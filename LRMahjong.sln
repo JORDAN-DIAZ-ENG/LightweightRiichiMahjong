@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35931.197 d17.13
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Examples", "Examples\Examples.vcxproj", "{527717A3-440A-493F-A99B-0FCDE312B72F}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LRMahjong", "LRMahjong\LRMahjong.vcxproj", "{78FDF85B-C74A-4777-9D8D-95814EAC9762}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{78FDF85B-C74A-4777-9D8D-95814EAC9762}.Debug|x64.ActiveCfg = Debug|x64
+		{78FDF85B-C74A-4777-9D8D-95814EAC9762}.Debug|x64.Build.0 = Debug|x64
+		{78FDF85B-C74A-4777-9D8D-95814EAC9762}.Release|x64.ActiveCfg = Release|x64
+		{78FDF85B-C74A-4777-9D8D-95814EAC9762}.Release|x64.Build.0 = Release|x64
+		{527717A3-440A-493F-A99B-0FCDE312B72F}.Debug|x64.ActiveCfg = Debug|x64
+		{527717A3-440A-493F-A99B-0FCDE312B72F}.Debug|x64.Build.0 = Debug|x64
+		{527717A3-440A-493F-A99B-0FCDE312B72F}.Release|x64.ActiveCfg = Release|x64
+		{527717A3-440A-493F-A99B-0FCDE312B72F}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8FE351FC-9809-46FE-9E65-0D6DBF045471}
+	EndGlobalSection
+EndGlobal
