@@ -75,7 +75,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)bin\$(Configuration)-$(Platform)\LRMahjong\" "$(SolutionDir)bin\$(Configuration)-$(Platform)\Examples\"</Command>
+      <Command>copy /Y "$(SolutionDir)bin\$(Configuration)-$(Platform)\LRMahjong\" "$(SolutionDir)bin\$(Configuration)-$(Platform)\ConsoleApp\"</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>
@@ -101,7 +101,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)bin\$(Configuration)-$(Platform)\LRMahjong\" "$(SolutionDir)bin\$(Configuration)-$(Platform)\Examples\"</Command>
+      <Command>copy /Y "$(SolutionDir)bin\$(Configuration)-$(Platform)\LRMahjong\" "$(SolutionDir)bin\$(Configuration)-$(Platform)\ConsoleApp\"</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>
