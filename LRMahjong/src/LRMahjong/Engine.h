@@ -7,12 +7,7 @@ namespace LRMahjong
 	class LRM_API Engine
 	{
 	public:
-		Engine() = default;
-		virtual ~Engine() = default;
-
-		void Run();
+		void Start();
 	};
-
-	Engine *CreateEngine(); // To be defined in user's application
 
 } // namespace LRMahjong

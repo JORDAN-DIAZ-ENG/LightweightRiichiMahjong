@@ -5,15 +5,7 @@
 
 namespace LRMahjong
 {
-	//Engine::Engine()
-	//{
-	//	// Constructor implementation
-	//}
-	//Engine::~Engine()
-	//{
-	//	// Destructor implementation
-	//}
-	void Engine::Run()
+	void Engine::Start()
 	{
 		// Main engine loop implementation
 		std::cout << R"(
