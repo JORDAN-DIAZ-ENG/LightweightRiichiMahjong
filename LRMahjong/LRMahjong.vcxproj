@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClCompile Include="src\LRMahjong\Model\GameState.cpp" />
     <ClCompile Include="src\LRMahjong\Engine.cpp" />
+    <ClCompile Include="src\LRMahjong\Model\Tile.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

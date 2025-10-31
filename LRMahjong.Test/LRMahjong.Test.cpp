@@ -10,6 +10,15 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace LRMahjongTest
 {
+	TEST_CLASS( DebugOnly )
+	{
+		Tile tile;
+		TEST_METHOD( AlwaysReturnTrue )
+		{
+			Assert::IsTrue( tile.AlwaysReturnTrue() );
+		}
+	};
+
 	TEST_CLASS( TileHelperSanityTest )
 	{
 		Tile tile;

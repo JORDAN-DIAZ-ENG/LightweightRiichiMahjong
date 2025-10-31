@@ -41,5 +41,8 @@
     <ClCompile Include="src\LRMahjong\Model\GameState.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\LRMahjong\Model\Tile.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include "../Core.h"
+
 namespace LRMahjong::Model
 {
 	enum class RiichiMahjongTile : uint8_t
@@ -33,5 +35,10 @@ namespace LRMahjong::Model
 		inline bool IsWind()   { return type >= RiichiMahjongTile::EAST && type <= RiichiMahjongTile::NORTH; }
 		inline bool IsDragon() { return type >= RiichiMahjongTile::RED_DRAGON && type <= RiichiMahjongTile::GREEN_DRAGON; }
 		inline bool IsHonor()  { return type >= RiichiMahjongTile::EAST; }
+
+
+		// Debug functions
+		LRM_DEBUG_API bool AlwaysReturnTrue();
+
 	};
 } // namespace LRMahjong::Model

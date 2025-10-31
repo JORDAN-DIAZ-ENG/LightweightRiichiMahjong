@@ -13,3 +13,9 @@
 #else
 	#error LRM only supports Windows!
 #endif
+
+#ifdef _DEBUG
+	#define LRM_DEBUG_API LRM_API
+#else
+	#define LRM_DEBUG_API
+#endif
