@@ -33,6 +33,15 @@
     <ClInclude Include="src\LRMahjong\Model\Tile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\Hand.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\Player.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\LRMahjong\RNG.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\LRMahjong\Engine.cpp">
@@ -42,6 +51,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\LRMahjong\Model\Tile.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\LRMahjong\Model\Hand.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\LRMahjong\Model\Player.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

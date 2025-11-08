@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include "../Core.h"
+#include <string>
 
 namespace LRMahjong::Model
 {
@@ -25,9 +26,21 @@ namespace LRMahjong::Model
 		TILE_COUNT // 34 total
 	};
 
+	enum class Suit : uint8_t
+	{
+		MANZU,
+		PINZU,
+		SOUZU,
+		HONOR
+	};
+
 	struct Tile
 	{
+		Tile() = default;
+		Tile( const RiichiMahjongTile );
+
 		RiichiMahjongTile type;
+		Suit suit;
 
 		inline bool IsManzu()  { return type >= RiichiMahjongTile::MAN_1 && type <= RiichiMahjongTile::MAN_9; }
 		inline bool IsPinzu()  { return type >= RiichiMahjongTile::PIN_1 && type <= RiichiMahjongTile::PIN_9; }
@@ -36,6 +49,15 @@ namespace LRMahjong::Model
 		inline bool IsDragon() { return type >= RiichiMahjongTile::RED_DRAGON && type <= RiichiMahjongTile::GREEN_DRAGON; }
 		inline bool IsHonor()  { return type >= RiichiMahjongTile::EAST; }
 
+		std::string PrintTile() const;
+		std::string ToTenhouString() const;
+
+		constexpr bool operator<( const Tile &other ) const
+		{
+			return static_cast<uint8_t>( type ) < static_cast<uint8_t>( other.type );
+		}
+
+		void determineSuit();
 
 		// Debug functions
 		LRM_DEBUG_API bool AlwaysReturnTrue();

@@ -3,8 +3,13 @@
 #include <stdio.h>
 #include <iostream>
 
+#include "Model/GameState.h"
+
 namespace LRMahjong
 {
+
+	using namespace Model;
+
 	void Engine::Start()
 	{
 		// Main engine loop implementation
@@ -21,6 +26,20 @@ namespace LRMahjong
 /_/ |_/_/_/\___/_/ /_/_/  /_/  /_/\__,_/_/ /_/_/ /\____/_/ /_/\__, /  
                                             /___/            /____/
     )" << std::endl;
+
+		GameState game;
+
+		std::cout << "Engine started." << std::endl;
+		std::cout << "\nPlayer One's Turn." << std::endl;
+		game.players[0].hand.PrintHand();
+		std::cout << "\n\nPlayer Two's Turn." << std::endl;
+		game.players[1].hand.PrintHand();
+		std::cout << "\n\nPlayer Three's Turn." << std::endl;
+		game.players[2].hand.PrintHand();
+		std::cout << "\n\nPlayer Four's Turn." << std::endl;
+		game.players[3].hand.PrintHand();
+		std::cout << "\n";
+
 	}
 
 } // namespace LRMahjong

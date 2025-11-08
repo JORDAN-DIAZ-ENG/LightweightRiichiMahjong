@@ -11,16 +11,21 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\LRMahjong\Model\Player.h" />
     <ClInclude Include="src\LRMahjong\Model\GameState.h" />
     <ClInclude Include="src\LRMahjong.h" />
     <ClInclude Include="src\LRMahjong\Engine.h" />
     <ClInclude Include="src\LRMahjong\Core.h" />
     <ClInclude Include="src\LRMahjong\EntryPoint.h" />
+    <ClInclude Include="src\LRMahjong\Model\Hand.h" />
     <ClInclude Include="src\LRMahjong\Model\Tile.h" />
+    <ClInclude Include="src\LRMahjong\RNG.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\LRMahjong\Model\Player.cpp" />
     <ClCompile Include="src\LRMahjong\Model\GameState.cpp" />
     <ClCompile Include="src\LRMahjong\Engine.cpp" />
+    <ClCompile Include="src\LRMahjong\Model\Hand.cpp" />
     <ClCompile Include="src\LRMahjong\Model\Tile.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
