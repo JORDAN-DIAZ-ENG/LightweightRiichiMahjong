@@ -63,9 +63,58 @@ std::string LRMahjong::Model::Tile::PrintTile() const
 	}
 }
 
-std::string Tile::ToTenhouString() const
+std::string Tile::ToTenhouDigit() const
 {
-    return std::string();
+	switch ( type )
+	{
+		// Man (Characters)
+	case RiichiMahjongTile::MAN_1: return "1";
+	case RiichiMahjongTile::MAN_2: return "2";
+	case RiichiMahjongTile::MAN_3: return "3";
+	case RiichiMahjongTile::MAN_4: return "4";
+	case RiichiMahjongTile::MAN_5: return "5";
+	case RiichiMahjongTile::MAN_6: return "6";
+	case RiichiMahjongTile::MAN_7: return "7";
+	case RiichiMahjongTile::MAN_8: return "8";
+	case RiichiMahjongTile::MAN_9: return "9";
+
+		// Pin (Dots / Circles)
+	case RiichiMahjongTile::PIN_1: return "1";
+	case RiichiMahjongTile::PIN_2: return "2";
+	case RiichiMahjongTile::PIN_3: return "3";
+	case RiichiMahjongTile::PIN_4: return "4";
+	case RiichiMahjongTile::PIN_5: return "5";
+	case RiichiMahjongTile::PIN_6: return "6";
+	case RiichiMahjongTile::PIN_7: return "7";
+	case RiichiMahjongTile::PIN_8: return "8";
+	case RiichiMahjongTile::PIN_9: return "9";
+
+		// Souzu (Bamboo)
+	case RiichiMahjongTile::SOU_1: return "1";
+	case RiichiMahjongTile::SOU_2: return "2";
+	case RiichiMahjongTile::SOU_3: return "3";
+	case RiichiMahjongTile::SOU_4: return "4";
+	case RiichiMahjongTile::SOU_5: return "5";
+	case RiichiMahjongTile::SOU_6: return "6";
+	case RiichiMahjongTile::SOU_7: return "7";
+	case RiichiMahjongTile::SOU_8: return "8";
+	case RiichiMahjongTile::SOU_9: return "9";
+
+		// Winds
+	case RiichiMahjongTile::EAST:  return "1";
+	case RiichiMahjongTile::SOUTH: return "2";
+	case RiichiMahjongTile::WEST:  return "3";
+	case RiichiMahjongTile::NORTH: return "4";
+
+		// Dragons
+	case RiichiMahjongTile::WHITE_DRAGON: return "5";
+	case RiichiMahjongTile::GREEN_DRAGON: return "6";
+	case RiichiMahjongTile::RED_DRAGON:   return "7";
+
+		// Fallback
+	default: return "?";
+
+	}
 }
 
 void Tile::determineSuit()
@@ -82,9 +131,13 @@ void Tile::determineSuit()
 	{
 		suit = Suit::SOUZU;
 	}
-	else
+	else if ( IsHonor() )
 	{
 		suit = Suit::HONOR;
+	}
+	else
+	{
+		suit = Suit::UNDEFINED;
 	}
 }
 

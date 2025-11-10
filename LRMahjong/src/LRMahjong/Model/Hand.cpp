@@ -36,15 +36,42 @@ void LRMahjong::Model::Hand::PrintHand()
 	}
 }
 
+inline char SuitToTenhouChar( Suit suit )
+{
+	switch ( suit )
+	{
+	case Suit::MANZU: return 'm';
+	case Suit::PINZU: return 'p';
+	case Suit::SOUZU: return 's';
+	case Suit::HONOR: return 'z';
+	default: return '?';
+	}
+}
+
 std::string Hand::ToTenhouString()
 {
 	std::string result;
 
+	Suit prevSuit = Suit::UNDEFINED;
+
 	Sort();
 	for ( const auto &tile : _sorted )
 	{
-		result += tile.ToTenhouString();
+		Suit currentSuit = tile.suit;
+		if ( currentSuit != prevSuit && prevSuit != Suit::UNDEFINED )
+		{
+			result += SuitToTenhouChar( prevSuit );
+		}
+
+		result += tile.ToTenhouDigit();
+		prevSuit = currentSuit;
 	}
+
+	if ( prevSuit != Suit::UNDEFINED )
+	{
+		result += SuitToTenhouChar( prevSuit );
+	}
+
 	return result;
 }
 

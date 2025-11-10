@@ -32,12 +32,16 @@ namespace LRMahjong
 		std::cout << "Engine started." << std::endl;
 		std::cout << "\nPlayer One's Turn." << std::endl;
 		game.players[0].hand.PrintHand();
+		std::cout << "\nTenhou String: " << game.players[0].hand.ToTenhouString();
 		std::cout << "\n\nPlayer Two's Turn." << std::endl;
 		game.players[1].hand.PrintHand();
+		std::cout << "\nTenhou String: " << game.players[1].hand.ToTenhouString();
 		std::cout << "\n\nPlayer Three's Turn." << std::endl;
 		game.players[2].hand.PrintHand();
+		std::cout << "\nTenhou String: " << game.players[2].hand.ToTenhouString();
 		std::cout << "\n\nPlayer Four's Turn." << std::endl;
 		game.players[3].hand.PrintHand();
+		std::cout << "\nTenhou String: " << game.players[3].hand.ToTenhouString();
 		std::cout << "\n";
 
 	}

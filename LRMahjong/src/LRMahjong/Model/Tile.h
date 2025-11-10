@@ -31,7 +31,8 @@ namespace LRMahjong::Model
 		MANZU,
 		PINZU,
 		SOUZU,
-		HONOR
+		HONOR,
+		UNDEFINED,
 	};
 
 	struct Tile
@@ -50,7 +51,7 @@ namespace LRMahjong::Model
 		inline bool IsHonor()  { return type >= RiichiMahjongTile::EAST; }
 
 		std::string PrintTile() const;
-		std::string ToTenhouString() const;
+		std::string ToTenhouDigit() const;
 
 		constexpr bool operator<( const Tile &other ) const
 		{
