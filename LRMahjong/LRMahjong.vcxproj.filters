@@ -24,9 +24,6 @@
     <ClInclude Include="src\LRMahjong.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\LRMahjong\EntryPoint.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\LRMahjong\Model\GameState.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -37,6 +34,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\LRMahjong\Model\Player.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\Meld.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\Rules.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\Observation.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\LRMahjong\RNG.h">

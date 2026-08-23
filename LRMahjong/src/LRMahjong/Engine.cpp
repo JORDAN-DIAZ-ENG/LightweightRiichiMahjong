@@ -1,49 +1,20 @@
 #include "Engine.h"
 
-#include <stdio.h>
-#include <iostream>
-
-#include "Model/GameState.h"
-
 namespace LRMahjong
 {
-
-	using namespace Model;
-
-	void Engine::Start()
+	Engine::Engine( const Model::Rules &rules, const uint64_t seed )
+		: _rules( rules )
+		, _rng( seed )
+		, _seed( seed )
 	{
-		// Main engine loop implementation
-		std::cout << R"(
-    __    _       __    __                _       __    __            
-   / /   (_)___ _/ /_  / /__      _____  (_)___ _/ /_  / /_           
-  / /   / / __ `/ __ \/ __/ | /| / / _ \/ / __ `/ __ \/ __/           
- / /___/ / /_/ / / / / /_ | |/ |/ /  __/ / /_/ / / / / /_             
-/_____/_/\__, /_/ /_/\__/ |__/|__/\___/_/\__, /_/ /_/\__/             
-    ____/____/     __    _    __  ___   /____/     _                  
-   / __ \(_|_)____/ /_  (_)  /  |/  /___ _/ /_    (_)___  ____  ____ _
-  / /_/ / / / ___/ __ \/ /  / /|_/ / __ `/ __ \  / / __ \/ __ \/ __ `/
- / _, _/ / / /__/ / / / /  / /  / / /_/ / / / / / / /_/ / / / / /_/ /
-/_/ |_/_/_/\___/_/ /_/_/  /_/  /_/\__,_/_/ /_/_/ /\____/_/ /_/\__, /  
-                                            /___/            /____/
-    )" << std::endl;
+		_state.Reset( _rules, 0 );
+	}
 
-		GameState game;
-
-		std::cout << "Engine started." << std::endl;
-		std::cout << "\nPlayer One's Turn." << std::endl;
-		game.players[0].hand.PrintHand();
-		std::cout << "\nTenhou String: " << game.players[0].hand.ToTenhouString();
-		std::cout << "\n\nPlayer Two's Turn." << std::endl;
-		game.players[1].hand.PrintHand();
-		std::cout << "\nTenhou String: " << game.players[1].hand.ToTenhouString();
-		std::cout << "\n\nPlayer Three's Turn." << std::endl;
-		game.players[2].hand.PrintHand();
-		std::cout << "\nTenhou String: " << game.players[2].hand.ToTenhouString();
-		std::cout << "\n\nPlayer Four's Turn." << std::endl;
-		game.players[3].hand.PrintHand();
-		std::cout << "\nTenhou String: " << game.players[3].hand.ToTenhouString();
-		std::cout << "\n";
-
+	void Engine::Reset( const uint64_t seed )
+	{
+		_seed = seed;
+		_rng.Seed( seed );
+		_state.Reset( _rules, 0 );
 	}
 
 } // namespace LRMahjong

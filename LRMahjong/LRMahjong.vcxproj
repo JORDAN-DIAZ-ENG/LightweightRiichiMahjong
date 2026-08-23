@@ -16,10 +16,12 @@
     <ClInclude Include="src\LRMahjong.h" />
     <ClInclude Include="src\LRMahjong\Engine.h" />
     <ClInclude Include="src\LRMahjong\Core.h" />
-    <ClInclude Include="src\LRMahjong\EntryPoint.h" />
     <ClInclude Include="src\LRMahjong\Model\Hand.h" />
     <ClInclude Include="src\LRMahjong\Model\Tile.h" />
     <ClInclude Include="src\LRMahjong\RNG.h" />
+    <ClInclude Include="src\LRMahjong\Model\Meld.h" />
+    <ClInclude Include="src\LRMahjong\Model\Rules.h" />
+    <ClInclude Include="src\LRMahjong\Model\Observation.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\LRMahjong\Model\Player.cpp" />
@@ -111,7 +113,8 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)bin\$(Configuration)-$(Platform)\LRMahjong\" "$(SolutionDir)bin\$(Configuration)-$(Platform)\ConsoleApp\"</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>

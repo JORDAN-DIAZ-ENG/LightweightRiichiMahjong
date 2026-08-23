@@ -1,149 +1,185 @@
 #include "Tile.h"
 
-#ifdef LRM_DEBUG_API
-
-using namespace LRMahjong::Model;
-
-Tile::Tile( const RiichiMahjongTile tileType ) : type( tileType )
+namespace LRMahjong::Model
 {
-	determineSuit();
-}
-
-std::string LRMahjong::Model::Tile::PrintTile() const
-{
-	switch ( type )
+	namespace
 	{
-			// Man (Characters)
-		case RiichiMahjongTile::MAN_1: return "1m";
-		case RiichiMahjongTile::MAN_2: return "2m";
-		case RiichiMahjongTile::MAN_3: return "3m";
-		case RiichiMahjongTile::MAN_4: return "4m";
-		case RiichiMahjongTile::MAN_5: return "5m";
-		case RiichiMahjongTile::MAN_6: return "6m";
-		case RiichiMahjongTile::MAN_7: return "7m";
-		case RiichiMahjongTile::MAN_8: return "8m";
-		case RiichiMahjongTile::MAN_9: return "9m";
-
-			// Pin (Dots / Circles)
-		case RiichiMahjongTile::PIN_1: return "1p";
-		case RiichiMahjongTile::PIN_2: return "2p";
-		case RiichiMahjongTile::PIN_3: return "3p";
-		case RiichiMahjongTile::PIN_4: return "4p";
-		case RiichiMahjongTile::PIN_5: return "5p";
-		case RiichiMahjongTile::PIN_6: return "6p";
-		case RiichiMahjongTile::PIN_7: return "7p";
-		case RiichiMahjongTile::PIN_8: return "8p";
-		case RiichiMahjongTile::PIN_9: return "9p";
-
-			// Souzu (Bamboo)
-		case RiichiMahjongTile::SOU_1: return "1s";
-		case RiichiMahjongTile::SOU_2: return "2s";
-		case RiichiMahjongTile::SOU_3: return "3s";
-		case RiichiMahjongTile::SOU_4: return "4s";
-		case RiichiMahjongTile::SOU_5: return "5s";
-		case RiichiMahjongTile::SOU_6: return "6s";
-		case RiichiMahjongTile::SOU_7: return "7s";
-		case RiichiMahjongTile::SOU_8: return "8s";
-		case RiichiMahjongTile::SOU_9: return "9s";
-
-			// Winds
-		case RiichiMahjongTile::EAST:  return "E";
-		case RiichiMahjongTile::SOUTH: return "S";
-		case RiichiMahjongTile::WEST:  return "W";
-		case RiichiMahjongTile::NORTH: return "N";
-
-			// Dragons
-		case RiichiMahjongTile::RED_DRAGON:   return "RD";
-		case RiichiMahjongTile::WHITE_DRAGON: return "WD";
-		case RiichiMahjongTile::GREEN_DRAGON: return "GD";
-
-			// Fallback
-		default: return "?";
-
+		// Indexed by ( id - 27 ).
+		constexpr const char *HONOR_NAMES[7] = { "E", "S", "W", "N", "WD", "GD", "RD" };
+		constexpr char SUIT_CHARS[3] = { 'm', 'p', 's' };
 	}
-}
 
-std::string Tile::ToTenhouDigit() const
-{
-	switch ( type )
+	std::string TileToString( const TileId t )
 	{
-		// Man (Characters)
-	case RiichiMahjongTile::MAN_1: return "1";
-	case RiichiMahjongTile::MAN_2: return "2";
-	case RiichiMahjongTile::MAN_3: return "3";
-	case RiichiMahjongTile::MAN_4: return "4";
-	case RiichiMahjongTile::MAN_5: return "5";
-	case RiichiMahjongTile::MAN_6: return "6";
-	case RiichiMahjongTile::MAN_7: return "7";
-	case RiichiMahjongTile::MAN_8: return "8";
-	case RiichiMahjongTile::MAN_9: return "9";
-
-		// Pin (Dots / Circles)
-	case RiichiMahjongTile::PIN_1: return "1";
-	case RiichiMahjongTile::PIN_2: return "2";
-	case RiichiMahjongTile::PIN_3: return "3";
-	case RiichiMahjongTile::PIN_4: return "4";
-	case RiichiMahjongTile::PIN_5: return "5";
-	case RiichiMahjongTile::PIN_6: return "6";
-	case RiichiMahjongTile::PIN_7: return "7";
-	case RiichiMahjongTile::PIN_8: return "8";
-	case RiichiMahjongTile::PIN_9: return "9";
-
-		// Souzu (Bamboo)
-	case RiichiMahjongTile::SOU_1: return "1";
-	case RiichiMahjongTile::SOU_2: return "2";
-	case RiichiMahjongTile::SOU_3: return "3";
-	case RiichiMahjongTile::SOU_4: return "4";
-	case RiichiMahjongTile::SOU_5: return "5";
-	case RiichiMahjongTile::SOU_6: return "6";
-	case RiichiMahjongTile::SOU_7: return "7";
-	case RiichiMahjongTile::SOU_8: return "8";
-	case RiichiMahjongTile::SOU_9: return "9";
-
-		// Winds
-	case RiichiMahjongTile::EAST:  return "1";
-	case RiichiMahjongTile::SOUTH: return "2";
-	case RiichiMahjongTile::WEST:  return "3";
-	case RiichiMahjongTile::NORTH: return "4";
-
-		// Dragons
-	case RiichiMahjongTile::WHITE_DRAGON: return "5";
-	case RiichiMahjongTile::GREEN_DRAGON: return "6";
-	case RiichiMahjongTile::RED_DRAGON:   return "7";
-
-		// Fallback
-	default: return "?";
-
+		if ( IsSuited( t ) )
+		{
+			return std::string{ static_cast<char>( '0' + RankOf( t ) ), SUIT_CHARS[t / 9] };
+		}
+		if ( IsHonor( t ) )
+		{
+			return std::string{ HONOR_NAMES[t - 27] };
+		}
+		return "?";
 	}
-}
 
-void Tile::determineSuit()
-{
-	if ( IsManzu() )
+	std::string TileToTenhouString( const TileId t )
 	{
-		suit = Suit::MANZU;
+		if ( IsSuited( t ) )
+		{
+			return std::string{ static_cast<char>( '0' + RankOf( t ) ), SUIT_CHARS[t / 9] };
+		}
+		if ( IsHonor( t ) )
+		{
+			// Honour digits are 1-7 in canonical order, hence ( id - 26 ).
+			return std::string{ static_cast<char>( '0' + ( t - 26 ) ), 'z' };
+		}
+		return "?";
 	}
-	else if ( IsPinzu() )
-	{
-		suit = Suit::PINZU;
-	}
-	else if ( IsSouzu() )
-	{
-		suit = Suit::SOUZU;
-	}
-	else if ( IsHonor() )
-	{
-		suit = Suit::HONOR;
-	}
-	else
-	{
-		suit = Suit::UNDEFINED;
-	}
-}
 
-bool Tile::AlwaysReturnTrue()
-{
-    return true;
-}
+	TileId TileFromTenhouString( const std::string_view text )
+	{
+		if ( text.size() != 2 ) return INVALID_TILE;
 
-#endif // LRM_DEBUG_API
+		const char digit = text[0];
+		const char suit  = text[1];
+		if ( digit < '0' || digit > '9' ) return INVALID_TILE;
+
+		const int rank = digit - '0';
+
+		if ( suit == 'z' )
+		{
+			if ( rank < 1 || rank > 7 ) return INVALID_TILE;
+			return static_cast<TileId>( 26 + rank );
+		}
+
+		int suitIndex = -1;
+		if ( suit == 'm' ) suitIndex = 0;
+		else if ( suit == 'p' ) suitIndex = 1;
+		else if ( suit == 's' ) suitIndex = 2;
+		else return INVALID_TILE;
+
+		// 0 denotes a red five; it maps onto the ordinary five.
+		const int effectiveRank = ( rank == 0 ) ? 5 : rank;
+		return static_cast<TileId>( suitIndex * 9 + ( effectiveRank - 1 ) );
+	}
+
+	char SuitToTenhouChar( const Suit suit )
+	{
+		switch ( suit )
+		{
+		case Suit::MANZU: return 'm';
+		case Suit::PINZU: return 'p';
+		case Suit::SOUZU: return 's';
+		case Suit::HONOR: return 'z';
+		default:          return '?';
+		}
+	}
+
+	std::string CountsToTenhouString( const Counts34 &counts, const AkaMask aka )
+	{
+		std::string result;
+
+		// Four groups: manzu, pinzu, souzu, honours.
+		for ( int group = 0; group < 4; ++group )
+		{
+			const TileId first = static_cast<TileId>( group * 9 );
+			const TileId last  = ( group == 3 ) ? TILE_KIND_COUNT : static_cast<TileId>( first + 9 );
+
+			const size_t lengthBefore = result.size();
+
+			for ( TileId t = first; t < last; ++t )
+			{
+				uint8_t remaining = counts[t];
+				if ( remaining == 0 ) continue;
+
+				// A red five is written as 0 and emitted first.
+				const AkaMask bit = AkaBitFor( t );
+				if ( bit != AKA_NONE && ( aka & bit ) != 0 )
+				{
+					result += '0';
+					--remaining;
+				}
+
+				const char digit = static_cast<char>( '0' + ( IsHonor( t ) ? ( t - 26 ) : RankOf( t ) ) );
+				result.append( remaining, digit );
+			}
+
+			if ( result.size() != lengthBefore )
+			{
+				result += ( group == 3 ) ? 'z' : SUIT_CHARS[group];
+			}
+		}
+
+		return result;
+	}
+
+	bool CountsFromTenhouString( const std::string_view text, Counts34 &outCounts, AkaMask &outAka )
+	{
+		Counts34 counts{};
+		AkaMask  aka = AKA_NONE;
+
+		// Digits accumulate until a suit character tells us which suit they were.
+		constexpr size_t MAX_PENDING = 32;
+		int    pending[MAX_PENDING];
+		size_t pendingCount = 0;
+
+		for ( const char c : text )
+		{
+			if ( c >= '0' && c <= '9' )
+			{
+				if ( pendingCount >= MAX_PENDING ) return false;
+				pending[pendingCount++] = c - '0';
+				continue;
+			}
+
+			int suitIndex = -1;
+			if ( c == 'm' ) suitIndex = 0;
+			else if ( c == 'p' ) suitIndex = 1;
+			else if ( c == 's' ) suitIndex = 2;
+			else if ( c == 'z' ) suitIndex = 3;
+			else return false;
+
+			if ( pendingCount == 0 ) return false; // suit character with no digits
+
+			for ( size_t i = 0; i < pendingCount; ++i )
+			{
+				const int rank = pending[i];
+				TileId tile;
+
+				if ( suitIndex == 3 )
+				{
+					if ( rank < 1 || rank > 7 ) return false;
+					tile = static_cast<TileId>( 26 + rank );
+				}
+				else if ( rank == 0 )
+				{
+					tile = static_cast<TileId>( suitIndex * 9 + 4 ); // red five
+					const AkaMask bit = AkaBitFor( tile );
+					if ( ( aka & bit ) != 0 ) return false;          // two of the same red five
+					aka |= bit;
+				}
+				else
+				{
+					tile = static_cast<TileId>( suitIndex * 9 + ( rank - 1 ) );
+				}
+
+				if ( counts[tile] >= 4 ) return false; // fifth copy
+				++counts[tile];
+			}
+
+			pendingCount = 0;
+		}
+
+		if ( pendingCount != 0 ) return false; // trailing digits with no suit
+
+		outCounts = counts;
+		outAka    = aka;
+		return true;
+	}
+
+	bool AlwaysReturnTrue()
+	{
+		return true;
+	}
+
+} // namespace LRMahjong::Model
