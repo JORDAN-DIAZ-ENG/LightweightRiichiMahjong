@@ -36,6 +36,9 @@
     <ClInclude Include="src\LRMahjong\Model\Player.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\Action.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="src\LRMahjong\Model\Meld.h">
       <Filter>Header Files</Filter>
     </ClInclude>

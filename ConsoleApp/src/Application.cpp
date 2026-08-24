@@ -10,44 +10,84 @@ namespace
 	void PrintBanner()
 	{
 		std::cout << R"(
-    __    _       __    __                _       __    __            
-   / /   (_)___ _/ /_  / /__      _____  (_)___ _/ /_  / /_           
-  / /   / / __ `/ __ \/ __/ | /| / / _ \/ / __ `/ __ \/ __/           
- / /___/ / /_/ / / / / /_ | |/ |/ /  __/ / /_/ / / / / /_             
-/_____/_/\__, /_/ /_/\__/ |__/|__/\___/_/\__, /_/ /_/\__/             
-    ____/____/     __    _    __  ___   /____/     _                  
+    __    _       __    __                _       __    __
+   / /   (_)___ _/ /_  / /__      _____  (_)___ _/ /_  / /_
+  / /   / / __ `/ __ \/ __/ | /| / / _ \/ / __ `/ __ \/ __/
+ / /___/ / /_/ / / / / /_ | |/ |/ /  __/ / /_/ / / / / /_
+/_____/_/\__, /_/ /_/\__/ |__/|__/\___/_/\__, /_/ /_/\__/
+    ____/____/     __    _    __  ___   /____/     _
    / __ \(_|_)____/ /_  (_)  /  |/  /___ _/ /_    (_)___  ____  ____ _
   / /_/ / / / ___/ __ \/ /  / /|_/ / __ `/ __ \  / / __ \/ __ \/ __ `/
  / _, _/ / / /__/ / / / /  / /  / / /_/ / / / / / / /_/ / / / / /_/ /
-/_/ |_/_/_/\___/_/ /_/_/  /_/  /_/\__,_/_/ /_/_/ /\____/_/ /_/\__, /  
+/_/ |_/_/_/\___/_/ /_/_/  /_/  /_/\__,_/_/ /_/_/ /\____/_/ /_/\__, /
                                             /___/            /____/
     )" << std::endl;
 	}
 
-	void ShowHand( const char *label, const std::string_view tenhou )
+	const char *OutcomeName( const HandOutcome outcome )
 	{
-		Hand hand;
-		if ( !Hand::FromTenhouString( tenhou, hand ) )
+		switch ( outcome )
 		{
-			std::cout << label << ": <malformed> \"" << tenhou << "\"\n";
-			return;
+		case HandOutcome::TSUMO:             return "tsumo";
+		case HandOutcome::RON:               return "ron";
+		case HandOutcome::EXHAUSTIVE_DRAW:   return "exhaustive draw";
+		case HandOutcome::ABORT_KYUUSHU:     return "abort: nine terminals";
+		case HandOutcome::ABORT_FOUR_KAN:    return "abort: four kans";
+		case HandOutcome::ABORT_FOUR_RIICHI: return "abort: four riichi";
+		case HandOutcome::ABORT_FOUR_WINDS:  return "abort: four winds";
+		case HandOutcome::ABORT_TRIPLE_RON:  return "abort: triple ron";
+		default:                             return "none";
 		}
-
-		std::cout << label << ": " << hand.ToString()
-			<< "\n    tenhou   : " << hand.ToTenhouString()
-			<< "\n    tiles    : " << static_cast<int>( hand.TotalTiles() )
-			<< "\n    aka mask : " << static_cast<int>( hand.Aka() ) << "\n\n";
 	}
 
-	void ShowRules( const char *label, const Rules &rules )
+	// Discards whatever was just drawn, which is always legal. Enough to drive
+	// a hand from the deal to its natural end.
+	void PlayOutTsumogiri( Engine &engine )
 	{
-		std::cout << label
-			<< "\n    players    : " << static_cast<int>( rules.numPlayers )
-			<< "\n    tiles      : " << rules.TotalTiles()
-			<< "\n    live draws : " << rules.LiveWallTiles()
-			<< "\n    chi        : " << ( rules.allowChi ? "yes" : "no" )
-			<< "\n    nukidora   : " << ( rules.nukidora ? "yes" : "no" )
-			<< "\n    start pts  : " << rules.startingPoints << "\n\n";
+		int guard = 0;
+
+		while ( engine.State().phase != Phase::HAND_OVER && guard++ < 4000 )
+		{
+			const GameState &s = engine.State();
+
+			if ( s.phase == Phase::DISCARD )
+			{
+				engine.Step( Action::Discard( s.currentPlayer, s.players[s.currentPlayer].drawn ) );
+			}
+			else if ( s.phase == Phase::CALL )
+			{
+				for ( uint8_t seat = 0; seat < s.PlayerCount(); ++seat )
+				{
+					if ( ( s.pendingCallers & ( 1u << seat ) ) != 0 )
+					{
+						engine.Step( Action::Pass( seat ) );
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	void RunHand( const char *label, const Rules &rules, const uint64_t seed )
+	{
+		Engine engine( rules, seed );
+		engine.StartHand( 0 );
+
+		std::cout << label << "  (seed " << seed << ")\n";
+		std::cout << "    dora indicator : "
+			<< TileToString( InstanceTile( engine.State().DoraIndicator( 0 ) ) ) << "\n";
+		std::cout << "    dealt hand     : " << engine.State().players[0].hand.ToTenhouString() << "\n";
+
+		PlayOutTsumogiri( engine );
+
+		const GameState &s = engine.State();
+
+		int discards = 0;
+		for ( uint8_t seat = 0; seat < s.PlayerCount(); ++seat ) discards += s.players[seat].discardCount;
+
+		std::cout << "    outcome        : " << OutcomeName( s.result.outcome ) << "\n";
+		std::cout << "    tiles drawn    : " << discards << "\n";
+		std::cout << "    wall remaining : " << static_cast<int>( s.LiveWallRemaining() ) << "\n\n";
 	}
 }
 
@@ -57,21 +97,32 @@ int main()
 
 	std::cout << "GameState size: " << sizeof( GameState ) << " bytes\n\n";
 
-	ShowRules( "Mahjong Soul, four player:", MahjongSoul4P() );
-	ShowRules( "Mahjong Soul, three player:", MahjongSoul3P() );
+	RunHand( "Mahjong Soul, four player: ", MahjongSoul4P(), 20250824 );
+	RunHand( "Mahjong Soul, three player:", MahjongSoul3P(), 20250824 );
 
-	ShowHand( "Closed hand   ", "123m456p789s11z22z" );
-	ShowHand( "With a red five", "1230m456p789s11z" );
+	// The same seed must replay the same hand, or no rollout is debuggable.
+	Engine a( MahjongSoul4P(), 4242 );
+	Engine b( MahjongSoul4P(), 4242 );
+	a.StartHand( 0 );
+	b.StartHand( 0 );
+	PlayOutTsumogiri( a );
+	PlayOutTsumogiri( b );
 
-	// Two engines on the same seed must produce identical streams.
-	Engine a( MahjongSoul4P(), 12345 );
-	Engine b( MahjongSoul4P(), 12345 );
 	bool identical = true;
-	for ( int i = 0; i < 1000; ++i )
+	for ( uint8_t seat = 0; seat < 4 && identical; ++seat )
 	{
-		if ( a.Random().NextU64() != b.Random().NextU64() ) identical = false;
+		const Player &pa = a.State().players[seat];
+		const Player &pb = b.State().players[seat];
+
+		if ( pa.discardCount != pb.discardCount ) identical = false;
+
+		for ( uint8_t i = 0; i < pa.discardCount && identical; ++i )
+		{
+			if ( pa.discards[i] != pb.discards[i] ) identical = false;
+		}
 	}
-	std::cout << "Seeded RNG reproducible: " << ( identical ? "yes" : "no" ) << "\n";
+
+	std::cout << "Seeded replay is deterministic: " << ( identical ? "yes" : "no" ) << "\n";
 
 	return 0;
 }

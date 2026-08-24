@@ -6,6 +6,7 @@
 #include "LRMahjong/Engine.h"
 #include "LRMahjong/RNG.h"
 
+#include "LRMahjong/Model/Action.h"
 #include "LRMahjong/Model/GameState.h"
 #include "LRMahjong/Model/Hand.h"
 #include "LRMahjong/Model/Meld.h"

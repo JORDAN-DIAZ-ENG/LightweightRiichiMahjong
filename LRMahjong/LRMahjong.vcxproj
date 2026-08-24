@@ -20,6 +20,7 @@
     <ClInclude Include="src\LRMahjong\Model\Tile.h" />
     <ClInclude Include="src\LRMahjong\RNG.h" />
     <ClInclude Include="src\LRMahjong\Model\Meld.h" />
+    <ClInclude Include="src\LRMahjong\Model\Action.h" />
     <ClInclude Include="src\LRMahjong\Model\Rules.h" />
     <ClInclude Include="src\LRMahjong\Model\Observation.h" />
   </ItemGroup>
