@@ -40,7 +40,12 @@ namespace LRMahjong::Model
 		uint8_t seatWind = 0;                        // 0 = east, offset from RiichiMahjongTile::EAST
 		uint8_t nukiCount = 0;                       // sanma: North tiles pulled as bonus dora
 
-		TileInstance drawn = INVALID_INSTANCE;       // tile currently held from a draw, if any
+		TileInstance drawn = INVALID_INSTANCE;       // the tile drawn this turn, for tsumogiri detection
+
+		// True between receiving a tile ( by draw or by call ) and discarding it.
+		// A call does not set `drawn`, because the called tile goes to the meld
+		// rather than the hand, but it does leave the seat owing a discard.
+		bool awaitingDiscard = false;
 
 		bool riichiDeclared = false;
 		bool doubleRiichi   = false;
@@ -50,13 +55,13 @@ namespace LRMahjong::Model
 		bool furitenPermanent = false;               // passed on a winning tile while in riichi
 		bool furitenTemporary = false;               // cleared on this player's next draw
 
-		// Concealed tiles this seat should be holding: 13 minus 3 per meld,
-		// plus one while a drawn tile is in hand. Holds for kan and for nuki,
-		// because both take a replacement tile.
+		// Concealed tiles this seat should be holding: 13 minus 3 per meld, plus
+		// one while a discard is owed. Holds for kan and for nuki, because both
+		// take a replacement tile.
 		constexpr uint8_t ExpectedHandSize() const
 		{
 			const uint8_t base = static_cast<uint8_t>( STARTING_HAND_SIZE - 3 * meldCount );
-			return IsValidInstance( drawn ) ? static_cast<uint8_t>( base + 1 ) : base;
+			return awaitingDiscard ? static_cast<uint8_t>( base + 1 ) : base;
 		}
 
 		constexpr bool IsMenzen() const
