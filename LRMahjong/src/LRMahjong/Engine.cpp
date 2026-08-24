@@ -1,5 +1,7 @@
 #include "Engine.h"
 
+#include "Model/WinCheck.h"
+
 namespace LRMahjong
 {
 	using namespace Model;
@@ -105,8 +107,14 @@ namespace LRMahjong
 
 	StepResult Engine::Step( const Action &action )
 	{
-		if ( _state.phase == Phase::HAND_OVER )     return StepResult::ILLEGAL;
-		if ( action.actor >= _rules.numPlayers )    return StepResult::ILLEGAL;
+		if ( _state.phase == Phase::HAND_OVER )  return StepResult::ILLEGAL;
+		if ( action.actor >= _rules.numPlayers ) return StepResult::ILLEGAL;
+
+		// One source of truth for legality. Anything the generator does not
+		// offer is refused here, which keeps the two from drifting apart.
+		ActionList legal;
+		LegalActions( _state, action.actor, legal );
+		if ( !legal.Contains( action ) ) return StepResult::ILLEGAL;
 
 		switch ( _state.phase )
 		{
@@ -118,8 +126,6 @@ namespace LRMahjong
 
 	StepResult Engine::StepDiscardPhase( const Action &action )
 	{
-		if ( action.actor != _state.currentPlayer ) return StepResult::ILLEGAL;
-
 		switch ( action.type )
 		{
 		case ActionType::DISCARD:
@@ -131,15 +137,10 @@ namespace LRMahjong
 		case ActionType::KITA:       return ApplyKita( action );
 
 		case ActionType::TSUMO:
-			// Whether the hand actually wins needs a hand parser, which
-			// arrives in M4. Here TSUMO is taken at face value.
 			EndHand( HandOutcome::TSUMO, action.actor );
 			return StepResult::HAND_ENDED;
 
 		case ActionType::KYUUSHU:
-			if ( !_state.firstGoAround )                  return StepResult::ILLEGAL;
-			if ( !_state.players[action.actor].awaitingDiscard ) return StepResult::ILLEGAL;
-			if ( !HasNineTerminalKinds( action.actor ) )  return StepResult::ILLEGAL;
 			EndHand( HandOutcome::ABORT_KYUUSHU );
 			return StepResult::HAND_ENDED;
 
@@ -154,25 +155,6 @@ namespace LRMahjong
 
 		const TileId t   = InstanceTile( action.tile );
 		const bool   aka = InstanceIsAka( action.tile );
-
-		if ( !IsValidTile( t ) )                  return StepResult::ILLEGAL;
-		if ( !p.awaitingDiscard )                 return StepResult::ILLEGAL;
-		if ( p.discardCount >= MAX_DISCARDS )     return StepResult::ILLEGAL;
-
-		if ( action.type == ActionType::RIICHI )
-		{
-			if ( p.riichiDeclared )               return StepResult::ILLEGAL;
-			if ( !p.IsMenzen() )                  return StepResult::ILLEGAL;
-			if ( p.points < 1000 )                return StepResult::ILLEGAL;
-			if ( _state.LiveWallRemaining() < 4 ) return StepResult::ILLEGAL;
-			// The tenpai requirement needs a shanten calculator and is
-			// enforced from M3.
-		}
-		else if ( p.riichiDeclared && action.tile != p.drawn )
-		{
-			// A declared hand is frozen: only the drawn tile may leave.
-			return StepResult::ILLEGAL;
-		}
 
 		if ( !p.hand.Remove( t, aka ) ) return StepResult::ILLEGAL;
 
@@ -201,8 +183,9 @@ namespace LRMahjong
 		p.drawn           = INVALID_INSTANCE;
 		p.awaitingDiscard = false;
 
-		_state.lastDiscard   = action.tile;
-		_state.lastDiscarder = action.actor;
+		_state.lastDiscard       = action.tile;
+		_state.lastDiscarder     = action.actor;
+		_state.forbiddenDiscards = 0; // the kuikae restriction lasts one discard
 
 		// A called kan's indicator waits for the caller's discard; a concealed
 		// kan already flipped its own.
@@ -212,21 +195,12 @@ namespace LRMahjong
 			_state.pendingDoraFlip = false;
 		}
 
-		_state.phase          = Phase::CALL;
-		_state.pendingCallers = OtherSeatsMask( action.actor );
-
-		return StepResult::OK;
+		return OpenCallWindow( action.actor );
 	}
 
 	StepResult Engine::ApplyAnkan( const Action &action )
 	{
 		Player &p = _state.players[action.actor];
-
-		if ( !IsValidTile( action.base ) )       return StepResult::ILLEGAL;
-		if ( !p.awaitingDiscard )                return StepResult::ILLEGAL;
-		if ( p.meldCount >= MAX_MELDS )          return StepResult::ILLEGAL;
-		if ( p.hand.Count( action.base ) < 4 )   return StepResult::ILLEGAL;
-		if ( _state.deadWallDraws >= 4 )         return StepResult::ILLEGAL;
 
 		const AkaMask akaBit = AkaBitFor( action.base );
 		const bool takesAka  = akaBit != AKA_NONE && ( p.hand.Aka() & akaBit ) != 0;
@@ -247,6 +221,8 @@ namespace LRMahjong
 
 		if ( !GiveDrawTo( action.actor, true ) ) return StepResult::ILLEGAL;
 
+		// Robbing a concealed kan is a rules variant this engine does not
+		// implement; only added kans open a window.
 		if ( FourKanAbort() )
 		{
 			EndHand( HandOutcome::ABORT_FOUR_KAN );
@@ -259,11 +235,6 @@ namespace LRMahjong
 	StepResult Engine::ApplyShouminkan( const Action &action )
 	{
 		Player &p = _state.players[action.actor];
-
-		if ( !IsValidTile( action.base ) )     return StepResult::ILLEGAL;
-		if ( !p.awaitingDiscard )              return StepResult::ILLEGAL;
-		if ( p.hand.Count( action.base ) < 1 ) return StepResult::ILLEGAL;
-		if ( _state.deadWallDraws >= 4 )       return StepResult::ILLEGAL;
 
 		Meld *pon = nullptr;
 		for ( uint8_t i = 0; i < p.meldCount; ++i )
@@ -284,33 +255,20 @@ namespace LRMahjong
 		pon->type = MeldType::SHOUMINKAN;
 		if ( takesAka ) pon->aka = static_cast<AkaMask>( pon->aka | akaBit );
 
-		// Chankan, robbing this kan for a ron, is a call window and belongs
-		// with the rest of call generation in M2.
-		if ( !GiveDrawTo( action.actor, true ) ) return StepResult::ILLEGAL;
+		// The added tile is open to being robbed before the replacement draw
+		// happens, so the window opens here and the draw waits for it to close.
+		_state.lastDiscard      = MakeInstance( action.base, takesAka );
+		_state.lastDiscarder    = action.actor;
+		_state.awaitingChankan  = true;
 
-		// A called kan's indicator waits for the discard that follows.
-		_state.pendingDoraFlip = true;
-
-		if ( FourKanAbort() )
-		{
-			EndHand( HandOutcome::ABORT_FOUR_KAN );
-			return StepResult::HAND_ENDED;
-		}
-
-		return StepResult::OK;
+		return OpenCallWindow( action.actor );
 	}
 
 	StepResult Engine::ApplyKita( const Action &action )
 	{
 		Player &p = _state.players[action.actor];
 
-		if ( !_rules.nukidora )          return StepResult::ILLEGAL;
-		if ( !p.awaitingDiscard )        return StepResult::ILLEGAL;
-		if ( _state.deadWallDraws >= 4 ) return StepResult::ILLEGAL;
-
 		const TileId north = Id( RiichiMahjongTile::NORTH );
-		if ( p.hand.Count( north ) < 1 ) return StepResult::ILLEGAL;
-
 		p.hand.Remove( north );
 		++p.nukiCount;
 
@@ -325,72 +283,175 @@ namespace LRMahjong
 	// Call phase
 	// -------------------------------------------------------------------
 
+	StepResult Engine::OpenCallWindow( const uint8_t excludingSeat )
+	{
+		_state.phase          = Phase::CALL;
+		_state.pendingCallers = OtherSeatsMask( excludingSeat );
+
+		for ( uint8_t seat = 0; seat < MAX_PLAYERS; ++seat )
+		{
+			_state.pendingResponse[seat] = Action{};
+		}
+
+		// Most discards are of no interest to anybody. A seat whose only legal
+		// answer is "pass" is not making a decision, so the engine answers for
+		// it, the same way it draws for a seat whose turn arrives. Without
+		// this, the overwhelming majority of steps in a rollout would be
+		// forced passes.
+		ActionList legal;
+		for ( uint8_t seat = 0; seat < _rules.numPlayers; ++seat )
+		{
+			if ( ( _state.pendingCallers & ( 1u << seat ) ) == 0 ) continue;
+
+			LegalActions( _state, seat, legal );
+			if ( legal.count == 1 && legal[0].type == ActionType::PASS )
+			{
+				_state.pendingResponse[seat] = legal[0];
+				_state.pendingCallers = static_cast<uint8_t>( _state.pendingCallers & ~( 1u << seat ) );
+			}
+		}
+
+		if ( _state.pendingCallers == 0 ) return ResolveResponses();
+		return StepResult::OK;
+	}
+
 	StepResult Engine::StepCallPhase( const Action &action )
 	{
 		const uint8_t bit = static_cast<uint8_t>( 1u << action.actor );
-		if ( ( _state.pendingCallers & bit ) == 0 ) return StepResult::ILLEGAL;
 
-		switch ( action.type )
+		// Responses are banked rather than applied, because ron outranks pon
+		// and kan, which outrank chi, and that ordering cannot be honoured
+		// until every seat has spoken.
+		_state.pendingResponse[action.actor] = action;
+		_state.pendingCallers = static_cast<uint8_t>( _state.pendingCallers & ~bit );
+
+		if ( _state.pendingCallers != 0 ) return StepResult::OK;
+
+		return ResolveResponses();
+	}
+
+	StepResult Engine::ResolveResponses()
+	{
+		// ---- ron, which beats everything --------------------------
+		uint8_t ronMask  = 0;
+		uint8_t ronCount = 0;
+
+		for ( uint8_t seat = 0; seat < _rules.numPlayers; ++seat )
 		{
-		case ActionType::PASS:
-			_state.pendingCallers = static_cast<uint8_t>( _state.pendingCallers & ~bit );
-			if ( _state.pendingCallers == 0 )
+			if ( _state.pendingResponse[seat].type == ActionType::RON )
 			{
-				ResolveDiscard();
-				return ( _state.phase == Phase::HAND_OVER ) ? StepResult::HAND_ENDED : StepResult::OK;
+				ronMask = static_cast<uint8_t>( ronMask | ( 1u << seat ) );
+				++ronCount;
 			}
-			return StepResult::OK;
-
-		case ActionType::RON:
-			// As with TSUMO, whether the hand wins is M4's question.
-			EndHand( HandOutcome::RON, action.actor, _state.lastDiscarder );
-			return StepResult::HAND_ENDED;
-
-		case ActionType::CHI:       return ApplyChi( action );
-		case ActionType::PON:       return ApplyPon( action );
-		case ActionType::DAIMINKAN: return ApplyDaiminkan( action );
-
-		default:
-			return StepResult::ILLEGAL;
 		}
 
-		// Priority between simultaneous claimants -- ron over pon over chi,
-		// and the triple ron abort -- is resolved in M2. Here each response is
-		// applied as it arrives.
+		if ( ronCount > 0 )
+		{
+			if ( ronCount >= 3 )
+			{
+				EndHand( HandOutcome::ABORT_TRIPLE_RON );
+				return StepResult::HAND_ENDED;
+			}
+
+			// Head bump: without double ron only the seat nearest the
+			// discarder collects.
+			if ( ronCount > 1 && !_rules.doubleRon )
+			{
+				for ( uint8_t i = 1; i <= _rules.numPlayers; ++i )
+				{
+					const uint8_t seat = static_cast<uint8_t>( ( _state.lastDiscarder + i ) % _rules.numPlayers );
+					if ( ( ronMask & ( 1u << seat ) ) != 0 )
+					{
+						ronMask = static_cast<uint8_t>( 1u << seat );
+						break;
+					}
+				}
+			}
+
+			EndHandWithRon( ronMask );
+			return StepResult::HAND_ENDED;
+		}
+
+		// Everyone who passed on a tile they could have won on is now furiten.
+		for ( uint8_t seat = 0; seat < _rules.numPlayers; ++seat )
+		{
+			if ( _state.pendingResponse[seat].type == ActionType::PASS ) UpdateFuritenOnPass( seat );
+		}
+
+		// A robbed kan window only ever accepted ron and pass.
+		if ( _state.awaitingChankan ) return CompleteChankanPass();
+
+		// ---- pon and kan ------------------------------------------
+		for ( uint8_t seat = 0; seat < _rules.numPlayers; ++seat )
+		{
+			const Action &r = _state.pendingResponse[seat];
+			if ( r.type == ActionType::PON )       return ApplyPon( r );
+			if ( r.type == ActionType::DAIMINKAN ) return ApplyDaiminkan( r );
+		}
+
+		// ---- chi --------------------------------------------------
+		for ( uint8_t seat = 0; seat < _rules.numPlayers; ++seat )
+		{
+			const Action &r = _state.pendingResponse[seat];
+			if ( r.type == ActionType::CHI ) return ApplyChi( r );
+		}
+
+		ResolveDiscard();
+		return ( _state.phase == Phase::HAND_OVER ) ? StepResult::HAND_ENDED : StepResult::OK;
+	}
+
+	StepResult Engine::CompleteChankanPass()
+	{
+		_state.awaitingChankan = false;
+
+		const uint8_t seat = _state.currentPlayer;
+
+		if ( !GiveDrawTo( seat, true ) ) return StepResult::ILLEGAL;
+
+		// A called kan's indicator waits for the discard that follows.
+		_state.pendingDoraFlip = true;
+		_state.phase           = Phase::DISCARD;
+
+		if ( FourKanAbort() )
+		{
+			EndHand( HandOutcome::ABORT_FOUR_KAN );
+			return StepResult::HAND_ENDED;
+		}
+
+		return StepResult::OK;
+	}
+
+	void Engine::UpdateFuritenOnPass( const uint8_t seat )
+	{
+		const Player &p      = _state.players[seat];
+		const TileId  called = InstanceTile( _state.lastDiscard );
+
+		if ( !IsValidTile( called ) ) return;
+
+		Counts34 test = p.hand.Counts();
+		if ( test[called] >= 4 ) return;
+		++test[called];
+
+		if ( !IsWinningHand( test, p.meldCount ) ) return;
+
+		// Declining a winning tile costs you the rest of the go-around, and
+		// the whole hand if your wait can no longer change.
+		_state.players[seat].furitenTemporary = true;
+		if ( p.riichiDeclared ) _state.players[seat].furitenPermanent = true;
 	}
 
 	StepResult Engine::ApplyChi( const Action &action )
 	{
-		if ( !_rules.allowChi ) return StepResult::ILLEGAL;
-
 		Player &p = _state.players[action.actor];
-		if ( p.meldCount >= MAX_MELDS ) return StepResult::ILLEGAL;
-
-		// Only the seat to the discarder's right may chi.
-		if ( action.actor != _state.NextSeat( _state.lastDiscarder ) ) return StepResult::ILLEGAL;
 
 		const TileId base   = action.base;
 		const TileId called = InstanceTile( _state.lastDiscard );
 
-		if ( !IsSuited( base ) )     return StepResult::ILLEGAL;
-		if ( RankOf( base ) > 7 )    return StepResult::ILLEGAL;
-		if ( !IsValidTile( called ) )return StepResult::ILLEGAL;
-
-		// The run must be inside one suit and must contain the called tile.
-		if ( SuitOf( base ) != SuitOf( static_cast<TileId>( base + 2 ) ) ) return StepResult::ILLEGAL;
-		if ( called < base || called > base + 2 )                          return StepResult::ILLEGAL;
-
-		// The two tiles that are not the called one must be in hand.
-		TileId needed[2];
+		TileId  needed[2];
 		uint8_t neededCount = 0;
 		for ( TileId t = base; t <= base + 2; ++t )
 		{
 			if ( t != called ) needed[neededCount++] = t;
-		}
-
-		for ( uint8_t i = 0; i < neededCount; ++i )
-		{
-			if ( p.hand.Count( needed[i] ) == 0 ) return StepResult::ILLEGAL;
 		}
 
 		for ( uint8_t i = 0; i < neededCount; ++i )
@@ -407,22 +468,17 @@ namespace LRMahjong
 		meld.aka    = static_cast<AkaMask>( action.meldAka |
 			( InstanceIsAka( _state.lastDiscard ) ? AkaBitFor( called ) : AKA_NONE ) );
 
-		CompleteCall( action.actor );
+		CompleteCall( action.actor, MeldType::CHI, base );
 		return StepResult::OK;
 	}
 
 	StepResult Engine::ApplyPon( const Action &action )
 	{
 		Player &p = _state.players[action.actor];
-		if ( p.meldCount >= MAX_MELDS ) return StepResult::ILLEGAL;
 
-		const TileId called = InstanceTile( _state.lastDiscard );
-		if ( !IsValidTile( called ) )   return StepResult::ILLEGAL;
-		if ( action.base != called )    return StepResult::ILLEGAL;
-		if ( p.hand.Count( called ) < 2 ) return StepResult::ILLEGAL;
-
-		const AkaMask bit = AkaBitFor( called );
-		const bool takesAka = bit != AKA_NONE && ( action.meldAka & bit ) != 0;
+		const TileId  called   = InstanceTile( _state.lastDiscard );
+		const AkaMask bit      = AkaBitFor( called );
+		const bool    takesAka = bit != AKA_NONE && ( action.meldAka & bit ) != 0;
 
 		p.hand.Remove( called, takesAka );
 		p.hand.Remove( called, false );
@@ -436,23 +492,17 @@ namespace LRMahjong
 		meld.aka    = static_cast<AkaMask>( ( takesAka ? bit : AKA_NONE ) |
 			( InstanceIsAka( _state.lastDiscard ) ? bit : AKA_NONE ) );
 
-		CompleteCall( action.actor );
+		CompleteCall( action.actor, MeldType::PON, called );
 		return StepResult::OK;
 	}
 
 	StepResult Engine::ApplyDaiminkan( const Action &action )
 	{
 		Player &p = _state.players[action.actor];
-		if ( p.meldCount >= MAX_MELDS )  return StepResult::ILLEGAL;
-		if ( _state.deadWallDraws >= 4 ) return StepResult::ILLEGAL;
 
-		const TileId called = InstanceTile( _state.lastDiscard );
-		if ( !IsValidTile( called ) )     return StepResult::ILLEGAL;
-		if ( action.base != called )      return StepResult::ILLEGAL;
-		if ( p.hand.Count( called ) < 3 ) return StepResult::ILLEGAL;
-
-		const AkaMask bit = AkaBitFor( called );
-		const bool takesAka = bit != AKA_NONE && ( p.hand.Aka() & bit ) != 0;
+		const TileId  called   = InstanceTile( _state.lastDiscard );
+		const AkaMask bit      = AkaBitFor( called );
+		const bool    takesAka = bit != AKA_NONE && ( p.hand.Aka() & bit ) != 0;
 
 		for ( uint8_t i = 0; i < 3; ++i )
 		{
@@ -468,7 +518,7 @@ namespace LRMahjong
 		meld.aka    = static_cast<AkaMask>( ( takesAka ? bit : AKA_NONE ) |
 			( InstanceIsAka( _state.lastDiscard ) ? bit : AKA_NONE ) );
 
-		CompleteCall( action.actor );
+		CompleteCall( action.actor, MeldType::MINKAN, called );
 
 		if ( !GiveDrawTo( action.actor, true ) ) return StepResult::ILLEGAL;
 
@@ -484,7 +534,7 @@ namespace LRMahjong
 		return StepResult::OK;
 	}
 
-	void Engine::CompleteCall( const uint8_t seat )
+	void Engine::CompleteCall( const uint8_t seat, const MeldType type, const TileId base )
 	{
 		// The claimed tile belongs to the meld now, so it must not be counted
 		// again in the discarder's pond.
@@ -505,6 +555,11 @@ namespace LRMahjong
 
 		_state.players[seat].awaitingDiscard = true;
 		_state.players[seat].drawn           = INVALID_INSTANCE;
+
+		// Kuikae: a kan leaves nothing to swap back, but a chi or pon does.
+		_state.forbiddenDiscards = ( type == MeldType::MINKAN )
+			? 0
+			: KuikaeMask( type, base, InstanceTile( _state.lastDiscard ) );
 
 		_state.currentPlayer  = seat;
 		_state.pendingCallers = 0;
@@ -555,17 +610,39 @@ namespace LRMahjong
 
 		if ( outcome == HandOutcome::TSUMO && winner < _rules.numPlayers )
 		{
+			r.winnerMask  = static_cast<uint8_t>( 1u << winner );
 			r.winningTile = _state.players[winner].drawn;
 			r.rinshan     = _state.drewFromDeadWall;
 			r.haitei      = !_state.drewFromDeadWall && _state.LiveWallEmpty();
 		}
-		else if ( outcome == HandOutcome::RON )
-		{
-			r.winningTile = _state.lastDiscard;
-			r.houtei      = _state.LiveWallEmpty();
-		}
 
 		_state.phase = Phase::HAND_OVER;
+	}
+
+	void Engine::EndHandWithRon( const uint8_t ronMask )
+	{
+		HandResult &r = _state.result;
+
+		r.outcome     = HandOutcome::RON;
+		r.winnerMask  = ronMask;
+		r.loser       = _state.lastDiscarder;
+		r.winningTile = _state.lastDiscard;
+		r.chankan     = _state.awaitingChankan;
+		r.houtei      = !_state.awaitingChankan && _state.LiveWallEmpty();
+
+		// The headline winner is the claimant sitting nearest the discarder.
+		for ( uint8_t i = 1; i <= _rules.numPlayers; ++i )
+		{
+			const uint8_t seat = static_cast<uint8_t>( ( _state.lastDiscarder + i ) % _rules.numPlayers );
+			if ( ( ronMask & ( 1u << seat ) ) != 0 )
+			{
+				r.winner = seat;
+				break;
+			}
+		}
+
+		_state.awaitingChankan = false;
+		_state.phase           = Phase::HAND_OVER;
 	}
 
 	// -------------------------------------------------------------------
@@ -630,19 +707,6 @@ namespace LRMahjong
 		}
 
 		return true;
-	}
-
-	bool Engine::HasNineTerminalKinds( const uint8_t seat ) const
-	{
-		const Counts34 &counts = _state.players[seat].hand.Counts();
-
-		uint8_t kinds = 0;
-		for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
-		{
-			if ( counts[t] > 0 && IsTerminalOrHonor( t ) ) ++kinds;
-		}
-
-		return kinds >= 9;
 	}
 
 } // namespace LRMahjong

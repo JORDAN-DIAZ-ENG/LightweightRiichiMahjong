@@ -115,11 +115,71 @@ namespace LRMahjong::Model
 		}
 	};
 
+	// Two actions are the same choice when every field a caller can pick
+	// matches. Used to check a submitted action against the generated set.
+	constexpr bool operator==( const Action &a, const Action &b )
+	{
+		return a.type == b.type
+			&& a.actor == b.actor
+			&& a.tile == b.tile
+			&& a.base == b.base
+			&& a.meldAka == b.meldAka;
+	}
+
+	constexpr bool operator!=( const Action &a, const Action &b ) { return !( a == b ); }
+
 	enum class StepResult : uint8_t
 	{
 		OK,         // applied, the hand continues
 		HAND_ENDED, // applied, and the hand is now over
 		ILLEGAL,    // rejected; the state is untouched
+	};
+
+	// A generated set of choices. Fixed capacity and no heap, because action
+	// generation runs at every node of a search.
+	//
+	// The widest case is a fourteen tile hand that can also declare riichi:
+	// at most fourteen distinct discards plus three red-five variants, doubled
+	// for the riichi form, plus kans, kita, tsumo and kyuushu. That stays
+	// under fifty.
+	struct ActionList
+	{
+		static constexpr uint8_t CAPACITY = 64;
+
+		Action  actions[CAPACITY]{};
+		uint8_t count = 0;
+
+		constexpr void Clear() { count = 0; }
+
+		constexpr bool Add( const Action &a )
+		{
+			if ( count >= CAPACITY ) return false;
+			actions[count++] = a;
+			return true;
+		}
+
+		constexpr bool Contains( const Action &a ) const
+		{
+			for ( uint8_t i = 0; i < count; ++i )
+			{
+				if ( actions[i] == a ) return true;
+			}
+			return false;
+		}
+
+		constexpr bool ContainsType( const ActionType type ) const
+		{
+			for ( uint8_t i = 0; i < count; ++i )
+			{
+				if ( actions[i].type == type ) return true;
+			}
+			return false;
+		}
+
+		constexpr const Action *begin() const { return actions; }
+		constexpr const Action *end()   const { return actions + count; }
+
+		constexpr const Action &operator[]( const uint8_t i ) const { return actions[i]; }
 	};
 
 } // namespace LRMahjong::Model

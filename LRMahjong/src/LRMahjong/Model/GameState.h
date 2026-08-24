@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "Action.h"
 #include "Player.h"
 #include "Rules.h"
 #include "Tile.h"
@@ -42,9 +43,13 @@ namespace LRMahjong::Model
 	struct HandResult
 	{
 		HandOutcome  outcome     = HandOutcome::NONE;
-		uint8_t      winner      = INVALID_SEAT;
+		uint8_t      winner      = INVALID_SEAT;       // on a multiple ron, the seat nearest the discarder
 		uint8_t      loser       = INVALID_SEAT;       // the discarder, on a ron
 		TileInstance winningTile = INVALID_INSTANCE;
+
+		// Mahjong Soul pays every claimant on a double ron, so a single winner
+		// field is not enough. Bit per seat; M4 iterates this to score.
+		uint8_t winnerMask = 0;
 
 		bool haitei  = false; // won on the last tile of the live wall
 		bool houtei  = false; // won on the final discard
@@ -99,6 +104,20 @@ namespace LRMahjong::Model
 		// Seats that have not yet responded to lastDiscard, as a bitmask. The
 		// discard resolves when this reaches zero.
 		uint8_t pendingCallers = 0;
+
+		// What each seat answered with. Responses are collected rather than
+		// applied on arrival, because ron outranks pon and kan, which outrank
+		// chi, and that ordering cannot be honoured until every seat has
+		// spoken.
+		Action pendingResponse[MAX_PLAYERS]{};
+
+		// A added kan can be robbed. While this is set the call window accepts
+		// only ron and pass, and a ron taken here is chankan.
+		bool awaitingChankan = false;
+
+		// Kuikae: the tiles the current player may not discard, having just
+		// claimed one. Mask over bits 0..33, cleared on the next discard.
+		uint64_t forbiddenDiscards = 0;
 
 		// A called kan flips its indicator only after the caller discards; a
 		// concealed kan flips immediately.

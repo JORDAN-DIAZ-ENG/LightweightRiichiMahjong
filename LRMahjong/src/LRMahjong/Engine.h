@@ -6,6 +6,7 @@
 #include "RNG.h"
 #include "Model/Action.h"
 #include "Model/GameState.h"
+#include "Model/LegalActions.h"
 #include "Model/Rules.h"
 
 namespace LRMahjong
@@ -16,6 +17,11 @@ namespace LRMahjong
 	// Step( action ), which is what lets a search apply an action to a copied
 	// state and what lets an assistant replay actions it only observed. There
 	// is no callback into a player object anywhere.
+	//
+	// Legality lives in one place: Step validates against LegalActions rather
+	// than re-deriving the rules, so generation and application cannot drift
+	// apart. That drift is the classic source of mahjong engine bugs that only
+	// surface deep inside a search.
 	//
 	// Not exported as a class: only the members that cross the DLL boundary
 	// carry LRM_API, so a consumer can inline State() and Random() and reach
@@ -65,23 +71,38 @@ namespace LRMahjong
 		Model::StepResult ApplyPon( const Model::Action &action );
 		Model::StepResult ApplyDaiminkan( const Model::Action &action );
 
-		// Called once every reactor has passed on the live discard.
+		// Every reactor has answered: settle them in priority order, ron above
+		// pon and kan, pon and kan above chi.
+		Model::StepResult ResolveResponses();
+
+		// Nobody claimed the discard, so the turn moves on.
 		void ResolveDiscard();
+
+		// A robbed kan window closed with no takers.
+		Model::StepResult CompleteChankanPass();
+
+		// Opens the window and answers for any seat whose only choice is to
+		// pass, resolving straight away when nobody has a real decision.
+		Model::StepResult OpenCallWindow( uint8_t excludingSeat );
+
+		// A seat that declined a tile it could have won on is furiten until its
+		// next draw, and for the rest of the hand if it is in riichi.
+		void UpdateFuritenOnPass( uint8_t seat );
 
 		void EndHand( Model::HandOutcome outcome,
 			uint8_t winner = Model::INVALID_SEAT,
 			uint8_t loser  = Model::INVALID_SEAT );
 
+		void EndHandWithRon( uint8_t ronMask );
+
 		// Shared bookkeeping for chi, pon and daiminkan.
-		void CompleteCall( uint8_t seat );
+		void CompleteCall( uint8_t seat, Model::MeldType type, Model::TileId base );
 
 		uint8_t OtherSeatsMask( uint8_t seat ) const;
 
 		bool FourKanAbort() const;
 		bool FourRiichiAbort() const;
 		bool FourWindsAbort() const;
-
-		bool HasNineTerminalKinds( uint8_t seat ) const;
 
 		Model::Rules     _rules;
 		Model::GameState _state{};
