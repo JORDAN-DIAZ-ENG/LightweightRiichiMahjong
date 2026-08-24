@@ -34,6 +34,7 @@ namespace LRMahjong::Model
 		bool doubleRon     = true;   // triple ron still aborts the hand
 		bool nagashiMangan = true;
 		bool agariYame     = true;   // dealer may end the game at all-last
+		bool kuikae        = false;  // may a caller immediately discard what it just claimed
 
 		bool kiriageMangan  = false; // UNVERIFIED
 		bool tsumoLoss      = false; // UNVERIFIED - sanma only; Tenhou applies it, Mahjong Soul is believed not to

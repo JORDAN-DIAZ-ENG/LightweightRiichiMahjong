@@ -39,6 +39,12 @@
     <ClInclude Include="src\LRMahjong\Model\Action.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\LegalActions.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\WinCheck.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="src\LRMahjong\Model\Meld.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -60,6 +66,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\LRMahjong\Model\Tile.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\LRMahjong\Model\LegalActions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\LRMahjong\Model\WinCheck.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\LRMahjong\Model\Hand.cpp">

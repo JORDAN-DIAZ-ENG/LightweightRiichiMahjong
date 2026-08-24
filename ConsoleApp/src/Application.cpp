@@ -1,3 +1,4 @@
+#include <chrono>
 #include <iostream>
 
 #include <LRMahjong.h>
@@ -68,6 +69,41 @@ namespace
 		}
 	}
 
+	// Which seat, if any, currently owes the engine a decision.
+	uint8_t SeatToAct( const GameState &s )
+	{
+		if ( s.phase == Phase::DISCARD ) return s.currentPlayer;
+
+		if ( s.phase == Phase::CALL )
+		{
+			for ( uint8_t seat = 0; seat < s.PlayerCount(); ++seat )
+			{
+				if ( ( s.pendingCallers & ( 1u << seat ) ) != 0 ) return seat;
+			}
+		}
+
+		return INVALID_SEAT;
+	}
+
+	// Plays a whole hand by picking uniformly among the legal actions. A
+	// crude policy, but it exercises every branch of the generator and would
+	// deadlock immediately if any reachable state offered nothing to do.
+	void PlayOutRandomly( Engine &engine )
+	{
+		ActionList legal;
+		int guard = 0;
+
+		while ( engine.State().phase != Phase::HAND_OVER && guard++ < 4000 )
+		{
+			const uint8_t seat = SeatToAct( engine.State() );
+			if ( seat == INVALID_SEAT ) break;
+
+			if ( LegalActions( engine.State(), seat, legal ) == 0 ) break;
+
+			engine.Step( legal[static_cast<uint8_t>( engine.Random().Below( legal.count ) )] );
+		}
+	}
+
 	void RunHand( const char *label, const Rules &rules, const uint64_t seed )
 	{
 		Engine engine( rules, seed );
@@ -122,7 +158,36 @@ int main()
 		}
 	}
 
-	std::cout << "Seeded replay is deterministic: " << ( identical ? "yes" : "no" ) << "\n";
+	std::cout << "Seeded replay is deterministic: " << ( identical ? "yes" : "no" ) << "\n\n";
+
+	// A random-legal policy over many hands: every branch of the generator
+	// gets exercised, and any reachable state with no legal action would show
+	// up here as a hang rather than as a subtle bug much later.
+	constexpr int HANDS = 500;
+
+	int outcomes[9] = {};
+	const auto start = std::chrono::steady_clock::now();
+
+	for ( int i = 0; i < HANDS; ++i )
+	{
+		Engine engine( MahjongSoul4P(), static_cast<uint64_t>( i ) );
+		engine.StartHand( static_cast<uint8_t>( i % 4 ) );
+		PlayOutRandomly( engine );
+
+		++outcomes[static_cast<int>( engine.Result().outcome )];
+	}
+
+	const auto elapsed = std::chrono::steady_clock::now() - start;
+	const double ms = std::chrono::duration<double, std::milli>( elapsed ).count();
+
+	std::cout << HANDS << " hands under a random legal policy, " << ms << " ms ("
+		<< ( ms / HANDS ) << " ms per hand)\n";
+
+	for ( int i = 1; i < 9; ++i )
+	{
+		if ( outcomes[i] == 0 ) continue;
+		std::cout << "    " << OutcomeName( static_cast<HandOutcome>( i ) ) << ": " << outcomes[i] << "\n";
+	}
 
 	return 0;
 }

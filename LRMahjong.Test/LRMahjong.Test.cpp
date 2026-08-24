@@ -656,6 +656,31 @@ namespace LRMahjongTest
 			}
 		}
 
+		// Replaces a seat's concealed hand outright. Test scenarios need exact
+		// shapes, and going through the tenhou parser keeps them readable.
+		void SetHand( Player &p, const char *tenhou )
+		{
+			Hand hand;
+			Assert::IsTrue( Hand::FromTenhouString( tenhou, hand ), L"test hand should parse" );
+			p.hand = hand;
+		}
+
+		// 123m 456m 789m 123p + 1p1p. A complete standard hand.
+		constexpr const char *WINNING_14 = "123456789m11123p";
+
+		// The same hand one tile short, waiting on 1p and 4p.
+		constexpr const char *TENPAI_13 = "123456789m1123p";
+
+		// Answers every outstanding call response with a pass.
+		void PassEveryone( Engine &engine )
+		{
+			const GameState &s = engine.State();
+			for ( uint8_t seat = 0; seat < s.PlayerCount(); ++seat )
+			{
+				if ( ( s.pendingCallers & ( 1u << seat ) ) != 0 ) engine.Step( Action::Pass( seat ) );
+			}
+		}
+
 		int TotalDiscards( const GameState &s )
 		{
 			int total = 0;
@@ -833,39 +858,78 @@ namespace LRMahjongTest
 	TEST_CLASS( TurnMachine )
 	{
 	public:
-		TEST_METHOD( DiscardOpensTheCallWindow )
+		// The window only opens for seats that actually have a choice. A seat
+		// whose only legal answer is "pass" is answered for by the engine, the
+		// same way a seat whose turn arrives is dealt its tile.
+		TEST_METHOD( TheCallWindowOnlyOpensForSeatsWithAChoice )
 		{
 			Engine engine( MahjongSoul4P(), 11 );
 			engine.StartHand( 0 );
 
-			const GameState &s = engine.State();
-			const StepResult r = engine.Step( Action::Discard( 0, s.players[0].drawn ) );
+			GameState &s = engine.State();
+
+			const TileId thrown = Id( RiichiMahjongTile::SOU_7 );
+			SetHand( s.players[0], "7s" );
+			s.players[0].drawn = MakeInstance( thrown );
+
+			// Only seat 2 can do anything with it.
+			SetHand( s.players[1], "1m" );
+			SetHand( s.players[2], "779s" );
+			SetHand( s.players[3], "1m" );
+
+			const StepResult r = engine.Step( Action::Discard( 0, MakeInstance( thrown ) ) );
 
 			Assert::IsTrue( r == StepResult::OK );
 			Assert::IsTrue( s.phase == Phase::CALL );
-			Assert::AreEqual( 14, static_cast<int>( s.pendingCallers ), L"the other three seats may respond" );
+			Assert::AreEqual( 0b0100, static_cast<int>( s.pendingCallers ), L"only the seat that can pon" );
 			Assert::AreEqual( 1, static_cast<int>( s.players[0].discardCount ) );
 			Assert::IsFalse( s.players[0].awaitingDiscard );
 			Assert::AreEqual( 0, static_cast<int>( s.lastDiscarder ) );
 		}
 
-		TEST_METHOD( PassingAllTheWayAdvancesTheTurn )
+		TEST_METHOD( PassingResolvesTheDiscardAndAdvancesTheTurn )
 		{
 			Engine engine( MahjongSoul4P(), 11 );
 			engine.StartHand( 0 );
 
-			const GameState &s = engine.State();
-			engine.Step( Action::Discard( 0, s.players[0].drawn ) );
+			GameState &s = engine.State();
 
-			engine.Step( Action::Pass( 1 ) );
-			Assert::IsTrue( s.phase == Phase::CALL, L"still waiting on two more seats" );
+			const TileId thrown = Id( RiichiMahjongTile::SOU_7 );
+			SetHand( s.players[0], "7s" );
+			s.players[0].drawn = MakeInstance( thrown );
+			SetHand( s.players[1], "1m" );
+			SetHand( s.players[2], "779s" );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( thrown ) ) );
+			Assert::IsTrue( s.phase == Phase::CALL );
+
 			engine.Step( Action::Pass( 2 ) );
-			engine.Step( Action::Pass( 3 ) );
 
 			Assert::IsTrue( s.phase == Phase::DISCARD );
 			Assert::AreEqual( 1, static_cast<int>( s.currentPlayer ) );
-			Assert::AreEqual( 14, static_cast<int>( s.players[1].hand.TotalTiles() ) );
 			Assert::IsTrue( s.players[1].awaitingDiscard );
+			Assert::IsTrue( IsValidInstance( s.players[1].drawn ) );
+		}
+
+		// With nobody able to call, the discard resolves inside the one step.
+		TEST_METHOD( AnUninterestingDiscardResolvesImmediately )
+		{
+			Engine engine( MahjongSoul4P(), 11 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId thrown = Id( RiichiMahjongTile::SOU_7 );
+			SetHand( s.players[0], "7s" );
+			s.players[0].drawn = MakeInstance( thrown );
+			for ( uint8_t seat = 1; seat < 4; ++seat ) SetHand( s.players[seat], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( thrown ) ) );
+
+			Assert::IsTrue( s.phase == Phase::DISCARD );
+			Assert::AreEqual( 0, static_cast<int>( s.pendingCallers ) );
+			Assert::AreEqual( 1, static_cast<int>( s.currentPlayer ) );
 		}
 
 		TEST_METHOD( OutOfTurnAndWrongPhaseActionsAreRejected )
@@ -912,8 +976,12 @@ namespace LRMahjongTest
 			Engine engine( MahjongSoul4P(), 13 );
 			engine.StartHand( 0 );
 
-			engine.Step( Action::Tsumo( 0 ) );
-			Assert::IsTrue( engine.State().phase == Phase::HAND_OVER );
+			GameState &s = engine.State();
+			SetHand( s.players[0], WINNING_14 );
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::PIN_1 ) );
+
+			Assert::IsTrue( engine.Step( Action::Tsumo( 0 ) ) == StepResult::HAND_ENDED );
+			Assert::IsTrue( s.phase == Phase::HAND_OVER );
 
 			Assert::IsTrue( engine.Step( Action::Pass( 1 ) ) == StepResult::ILLEGAL );
 		}
@@ -1013,14 +1081,18 @@ namespace LRMahjongTest
 			engine.StartHand( 0 );
 
 			GameState &s = engine.State();
-			const TileInstance thrown = s.players[0].drawn;
-			const TileId t = InstanceTile( thrown );
 
 			// Hand sizes are deliberately not kept honest here; this exercises
-			// the call mechanics, not the deal.
-			s.players[1].hand.Clear();
-			s.players[1].hand.Add( t );
-			s.players[1].hand.Add( t );
+			// the call mechanics, not the deal. The spare 9s matters: a call
+			// that would leave nothing legal to discard is itself illegal.
+			const TileId t = Id( RiichiMahjongTile::SOU_7 );
+			const TileInstance thrown = MakeInstance( t );
+
+			SetHand( s.players[0], "7s" );
+			s.players[0].drawn = thrown;
+			SetHand( s.players[1], "779s" );
+			SetHand( s.players[2], "1m" );
+			SetHand( s.players[3], "1m" );
 
 			engine.Step( Action::Discard( 0, thrown ) );
 			Assert::IsTrue( engine.Step( Action::Pon( 1, t ) ) == StepResult::OK );
@@ -1028,7 +1100,7 @@ namespace LRMahjongTest
 			Assert::AreEqual( 1, static_cast<int>( s.players[1].meldCount ) );
 			Assert::IsTrue( s.players[1].melds[0].type == MeldType::PON );
 			Assert::AreEqual( static_cast<int>( t ), static_cast<int>( s.players[1].melds[0].base ) );
-			Assert::AreEqual( 0, static_cast<int>( s.players[1].hand.TotalTiles() ), L"both copies left the hand" );
+			Assert::AreEqual( 1, static_cast<int>( s.players[1].hand.TotalTiles() ), L"both copies left the hand" );
 
 			Assert::AreEqual( 1, static_cast<int>( s.currentPlayer ) );
 			Assert::IsTrue( s.phase == Phase::DISCARD );
@@ -1054,12 +1126,10 @@ namespace LRMahjongTest
 			s.players[0].drawn = MakeInstance( called );
 			s.players[0].awaitingDiscard = true;
 
-			for ( uint8_t seat = 1; seat <= 2; ++seat )
-			{
-				s.players[seat].hand.Clear();
-				s.players[seat].hand.Add( Id( RiichiMahjongTile::SOU_1 ) );
-				s.players[seat].hand.Add( Id( RiichiMahjongTile::SOU_2 ) );
-			}
+			// The spare 9s matters: a chi that would leave the hand with no
+			// legal discard is itself illegal.
+			for ( uint8_t seat = 1; seat <= 2; ++seat ) SetHand( s.players[seat], "129s" );
+			SetHand( s.players[3], "1m" );
 
 			engine.Step( Action::Discard( 0, MakeInstance( called ) ) );
 
@@ -1250,7 +1320,12 @@ namespace LRMahjongTest
 			GameState &s = engine.State();
 			const int pointsBefore = s.players[0].points;
 
-			Assert::IsTrue( engine.Step( Action::Riichi( 0, s.players[0].drawn ) ) == StepResult::OK );
+			// Tenpai once the spare 9s goes.
+			SetHand( s.players[0], "123456789m1123p9s" );
+			const TileInstance spare = MakeInstance( Id( RiichiMahjongTile::SOU_9 ) );
+			s.players[0].drawn = spare;
+
+			Assert::IsTrue( engine.Step( Action::Riichi( 0, spare ) ) == StepResult::OK );
 
 			Assert::IsTrue( s.players[0].riichiDeclared );
 			Assert::IsTrue( s.players[0].ippatsu );
@@ -1291,33 +1366,43 @@ namespace LRMahjongTest
 			engine.StartHand( 0 );
 
 			GameState &s = engine.State();
-			engine.Step( Action::Riichi( 0, s.players[0].drawn ) );
-			engine.Step( Action::Pass( 1 ) );
-			engine.Step( Action::Pass( 2 ) );
-			engine.Step( Action::Pass( 3 ) );
+
+			SetHand( s.players[0], "123456789m1123p9s" );
+			const TileInstance spare = MakeInstance( Id( RiichiMahjongTile::SOU_9 ) );
+			s.players[0].drawn = spare;
+
+			Assert::IsTrue( engine.Step( Action::Riichi( 0, spare ) ) == StepResult::OK );
+			PassEveryone( engine );
 
 			// Round back to the declarer.
-			for ( int i = 0; i < 3; ++i )
+			int guard = 0;
+			while ( s.currentPlayer != 0 && s.phase != Phase::HAND_OVER && guard++ < 20 )
 			{
 				engine.Step( Action::Discard( s.currentPlayer, s.players[s.currentPlayer].drawn ) );
-				for ( uint8_t seat = 0; seat < 4; ++seat )
-				{
-					if ( ( s.pendingCallers & ( 1u << seat ) ) != 0 ) engine.Step( Action::Pass( seat ) );
-				}
+				PassEveryone( engine );
 			}
 
 			Assert::AreEqual( 0, static_cast<int>( s.currentPlayer ) );
+			Assert::IsTrue( s.phase == Phase::DISCARD );
 
-			TileId other = INVALID_TILE;
+			// A declared hand is frozen: every discard on offer is the tile it
+			// just drew.
+			ActionList legal;
+			LegalActions( s, 0, legal );
+
 			const TileId drawnTile = InstanceTile( s.players[0].drawn );
-			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
-			{
-				if ( t != drawnTile && s.players[0].hand.Count( t ) > 0 ) { other = t; break; }
-			}
-			Assert::IsTrue( IsValidTile( other ) );
+			int discardOptions = 0;
 
-			Assert::IsTrue( engine.Step( Action::Discard( 0, MakeInstance( other ) ) ) == StepResult::ILLEGAL );
-			Assert::IsTrue( engine.Step( Action::Discard( 0, s.players[0].drawn ) ) == StepResult::OK );
+			for ( const Action &a : legal )
+			{
+				if ( a.type != ActionType::DISCARD ) continue;
+				++discardOptions;
+				Assert::AreEqual( static_cast<int>( drawnTile ), static_cast<int>( InstanceTile( a.tile ) ),
+					L"riichi may only shed what it drew" );
+			}
+
+			Assert::IsTrue( discardOptions > 0 );
+			Assert::IsFalse( legal.ContainsType( ActionType::RIICHI ), L"already declared" );
 		}
 	};
 
@@ -1431,6 +1516,8 @@ namespace LRMahjongTest
 			engine.StartHand( 0 );
 
 			GameState &s = engine.State();
+			SetHand( s.players[0], WINNING_14 );
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::PIN_1 ) );
 			s.liveWallHead = s.liveWallTail; // the tile in hand was the last one
 
 			Assert::IsTrue( engine.Step( Action::Tsumo( 0 ) ) == StepResult::HAND_ENDED );
@@ -1455,7 +1542,10 @@ namespace LRMahjongTest
 			s.players[0].awaitingDiscard = true;
 
 			engine.Step( Action::Ankan( 0, t ) );
-			engine.Step( Action::Tsumo( 0 ) );
+
+			// With the kan melded, eleven concealed tiles complete the hand.
+			SetHand( s.players[0], "123456789m11p" );
+			Assert::IsTrue( engine.Step( Action::Tsumo( 0 ) ) == StepResult::HAND_ENDED );
 
 			Assert::IsTrue( s.result.rinshan );
 			Assert::IsFalse( s.result.haitei, L"a dead wall tile is never haitei" );
@@ -1467,9 +1557,18 @@ namespace LRMahjongTest
 			engine.StartHand( 0 );
 
 			GameState &s = engine.State();
+
+			const TileId winning = Id( RiichiMahjongTile::PIN_1 );
+			SetHand( s.players[0], "1p" );
+			s.players[0].drawn = MakeInstance( winning );
+
+			SetHand( s.players[2], TENPAI_13 );  // waiting on 1p
+			SetHand( s.players[1], "1m" );
+			SetHand( s.players[3], "1m" );
+
 			s.liveWallHead = s.liveWallTail;
 
-			engine.Step( Action::Discard( 0, s.players[0].drawn ) );
+			engine.Step( Action::Discard( 0, MakeInstance( winning ) ) );
 			Assert::IsTrue( engine.Step( Action::Ron( 2 ) ) == StepResult::HAND_ENDED );
 
 			Assert::IsTrue( s.result.outcome == HandOutcome::RON );
@@ -1505,6 +1604,813 @@ namespace LRMahjongTest
 
 			Assert::IsTrue( s.phase == Phase::HAND_OVER );
 			Assert::IsTrue( s.result.outcome == HandOutcome::ABORT_FOUR_WINDS );
+		}
+	};
+
+	// =================================================================
+	// M2: legal action generation, priority, furiten and kuikae.
+	// =================================================================
+
+	namespace
+	{
+		Counts34 CountsOf( const char *tenhou )
+		{
+			Counts34 counts{};
+			AkaMask  aka = AKA_NONE;
+			Assert::IsTrue( CountsFromTenhouString( tenhou, counts, aka ), L"test hand should parse" );
+			return counts;
+		}
+
+		uint64_t WaitMaskOf( const char *tenhou, const uint8_t meldCount = 0 )
+		{
+			return WaitingTiles( CountsOf( tenhou ), meldCount );
+		}
+
+		uint64_t MaskOf( const std::initializer_list<RiichiMahjongTile> tiles )
+		{
+			uint64_t mask = 0;
+			for ( const RiichiMahjongTile t : tiles ) mask |= ( 1ULL << Id( t ) );
+			return mask;
+		}
+
+		// Melds a pon onto a seat without going through the call machinery.
+		void GivePon( Player &p, const TileId t )
+		{
+			p.melds[p.meldCount].type = MeldType::PON;
+			p.melds[p.meldCount].base = t;
+			++p.meldCount;
+		}
+	}
+
+	TEST_CLASS( WinShapes )
+	{
+	public:
+		TEST_METHOD( StandardHandsAreRecognised )
+		{
+			const char *winning[] = {
+				"123456789m11123p",  // three runs, a run and a pair
+				"111222333444m55p",  // four triplets
+				"123123123m11p123s", // repeated runs across suits
+				"11122233344455z",   // honours only
+			};
+
+			for ( const char *text : winning )
+			{
+				Assert::IsTrue( IsWinningHand( CountsOf( text ), 0 ), L"should be a complete hand" );
+			}
+		}
+
+		TEST_METHOD( IncompleteHandsAreRejected )
+		{
+			const char *losing[] = {
+				"123456789m1123p",   // thirteen tiles, not fourteen
+				"123456789m11223p",  // fourteen tiles, no decomposition
+				"1245678m11123p99s",
+			};
+
+			for ( const char *text : losing )
+			{
+				Assert::IsFalse( IsWinningHand( CountsOf( text ), 0 ), L"should not be complete" );
+			}
+		}
+
+		TEST_METHOD( SevenPairsNeedsSevenDistinctPairs )
+		{
+			Assert::IsTrue( IsSevenPairs( CountsOf( "1133557799m1133p" ) ) );
+
+			// Four of a kind is not two of the seven pairs.
+			Assert::IsFalse( IsSevenPairs( CountsOf( "111133557799m11p" ) ) );
+
+			// Only a concealed hand may be seven pairs.
+			Assert::IsTrue( IsWinningHand( CountsOf( "1133557799m1133p" ), 0 ) );
+		}
+
+		TEST_METHOD( ThirteenOrphansIsRecognised )
+		{
+			Assert::IsTrue( IsThirteenOrphans( CountsOf( "119m19p19s1234567z" ) ) );
+			Assert::IsTrue( IsWinningHand( CountsOf( "119m19p19s1234567z" ), 0 ) );
+
+			// Missing one of the thirteen kinds.
+			Assert::IsFalse( IsThirteenOrphans( CountsOf( "1199m19p19s123456z" ) ) );
+		}
+
+		TEST_METHOD( MeldedHandsSupplyFewerSets )
+		{
+			// One meld: eleven concealed tiles making three sets and a pair.
+			Assert::IsTrue( IsWinningHand( CountsOf( "123456789m11p" ), 1 ) );
+			Assert::IsFalse( IsWinningHand( CountsOf( "123456789m11p" ), 0 ), L"wrong tile count for a closed hand" );
+
+			// Three melds: five concealed tiles making one set and a pair.
+			Assert::IsTrue( IsWinningHand( CountsOf( "123m11p" ), 3 ) );
+
+			// Four melds: just the pair.
+			Assert::IsTrue( IsWinningHand( CountsOf( "11p" ), 4 ) );
+		}
+
+		TEST_METHOD( WaitsAreEnumerated )
+		{
+			// 123m 456m 789m + 11p pair + 23p, so 1p or 4p completes it.
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::PIN_1, RiichiMahjongTile::PIN_4 } ),
+				WaitMaskOf( "123456789m1123p" ) );
+
+			// Four complete sets and a lone tile is a tanki on that tile.
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::SOU_5 } ),
+				WaitMaskOf( "123456789m123p5s" ) );
+		}
+
+		TEST_METHOD( ClosedAndEdgeWaits )
+		{
+			// 13m is a kanchan, closed on 2m.
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::MAN_2 } ),
+				WaitMaskOf( "13m456789m11123p" ) );
+
+			// 12m is a penchan, only 3m serves.
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::MAN_3 } ),
+				WaitMaskOf( "12m456789m11123p" ) );
+		}
+
+		TEST_METHOD( TenpaiAgreesWithTheWaitSet )
+		{
+			Assert::IsTrue( IsTenpai( CountsOf( "123456789m1123p" ), 0 ) );
+			Assert::IsFalse( IsTenpai( CountsOf( "123456789m1129p" ), 0 ) );
+			Assert::AreEqual( uint64_t( 0 ), WaitMaskOf( "123456789m1129p" ) );
+		}
+
+		TEST_METHOD( ThirteenOrphansWaitsOnAllThirteen )
+		{
+			const uint64_t waits = WaitMaskOf( "19m19p19s1234567z" );
+
+			uint8_t count = 0;
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				if ( ( waits & ( 1ULL << t ) ) != 0 )
+				{
+					Assert::IsTrue( IsTerminalOrHonor( t ) );
+					++count;
+				}
+			}
+
+			Assert::AreEqual( 13, static_cast<int>( count ) );
+		}
+	};
+
+	TEST_CLASS( Furiten )
+	{
+	public:
+		TEST_METHOD( AWaitInYourOwnPondBlocksRon )
+		{
+			Engine engine( MahjongSoul4P(), 100 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			SetHand( s.players[2], TENPAI_13 ); // waits on 1p and 4p
+			Assert::IsFalse( IsFuriten( s, 2 ) );
+
+			// Having discarded a 4p earlier, seat 2 can no longer ron either.
+			s.players[2].discards[0]  = MakeInstance( Id( RiichiMahjongTile::PIN_4 ) );
+			s.players[2].discardCount = 1;
+
+			Assert::IsTrue( IsFuriten( s, 2 ), L"any waited-on tile in your own pond is enough" );
+
+			const TileId winning = Id( RiichiMahjongTile::PIN_1 );
+			SetHand( s.players[0], "1p" );
+			s.players[0].drawn = MakeInstance( winning );
+			SetHand( s.players[1], "1m" );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( winning ) ) );
+
+			Assert::IsTrue( engine.Step( Action::Ron( 2 ) ) == StepResult::ILLEGAL );
+		}
+
+		TEST_METHOD( DecliningAWinningTileCausesTemporaryFuriten )
+		{
+			Engine engine( MahjongSoul4P(), 101 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId winning = Id( RiichiMahjongTile::PIN_1 );
+			SetHand( s.players[0], "1p" );
+			s.players[0].drawn = MakeInstance( winning );
+			SetHand( s.players[1], "1m" );
+			SetHand( s.players[2], TENPAI_13 );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( winning ) ) );
+			Assert::IsTrue( ( s.pendingCallers & 0b0100 ) != 0, L"seat 2 was offered the ron" );
+
+			engine.Step( Action::Pass( 2 ) );
+
+			Assert::IsTrue( s.players[2].furitenTemporary );
+			Assert::IsFalse( s.players[2].furitenPermanent, L"not in riichi, so it lifts" );
+			Assert::IsTrue( IsFuriten( s, 2 ) );
+		}
+
+		TEST_METHOD( TemporaryFuritenLiftsOnTheNextDraw )
+		{
+			Engine engine( MahjongSoul4P(), 102 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+			s.players[2].furitenTemporary = true;
+
+			// Walk the turn round to seat 2 so that it draws.
+			int guard = 0;
+			while ( s.currentPlayer != 2 && s.phase != Phase::HAND_OVER && guard++ < 20 )
+			{
+				engine.Step( Action::Discard( s.currentPlayer, s.players[s.currentPlayer].drawn ) );
+				PassEveryone( engine );
+			}
+
+			Assert::AreEqual( 2, static_cast<int>( s.currentPlayer ) );
+			Assert::IsFalse( s.players[2].furitenTemporary, L"drawing clears it" );
+		}
+
+		TEST_METHOD( RiichiFuritenNeverLifts )
+		{
+			Engine engine( MahjongSoul4P(), 103 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId winning = Id( RiichiMahjongTile::PIN_1 );
+			SetHand( s.players[0], "1p" );
+			s.players[0].drawn = MakeInstance( winning );
+			SetHand( s.players[1], "1m" );
+			SetHand( s.players[2], TENPAI_13 );
+			SetHand( s.players[3], "1m" );
+
+			// Seat 2 has already declared, so its wait can never change again.
+			s.players[2].riichiDeclared = true;
+
+			engine.Step( Action::Discard( 0, MakeInstance( winning ) ) );
+			engine.Step( Action::Pass( 2 ) );
+
+			Assert::IsTrue( s.players[2].furitenPermanent );
+
+			// Even a fresh draw leaves it furiten.
+			s.players[2].furitenTemporary = false;
+			Assert::IsTrue( IsFuriten( s, 2 ) );
+		}
+
+		TEST_METHOD( FuritenStillAllowsTsumo )
+		{
+			Engine engine( MahjongSoul4P(), 104 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			SetHand( s.players[0], WINNING_14 );
+			s.players[0].drawn            = MakeInstance( Id( RiichiMahjongTile::PIN_1 ) );
+			s.players[0].furitenPermanent = true;
+
+			ActionList legal;
+			LegalActions( s, 0, legal );
+
+			Assert::IsTrue( legal.ContainsType( ActionType::TSUMO ), L"furiten only blocks ron" );
+		}
+	};
+
+	TEST_CLASS( CallPriority )
+	{
+	public:
+		TEST_METHOD( RonOutranksPon )
+		{
+			Engine engine( MahjongSoul4P(), 200 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId winning = Id( RiichiMahjongTile::PIN_1 );
+			SetHand( s.players[0], "1p" );
+			s.players[0].drawn = MakeInstance( winning );
+			SetHand( s.players[1], "11p9s" );   // could pon
+			SetHand( s.players[2], TENPAI_13 ); // could ron
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( winning ) ) );
+
+			Assert::IsTrue( engine.Step( Action::Pon( 1, winning ) ) == StepResult::OK );
+			Assert::IsTrue( engine.Step( Action::Ron( 2 ) ) == StepResult::HAND_ENDED );
+
+			Assert::IsTrue( s.result.outcome == HandOutcome::RON );
+			Assert::AreEqual( 2, static_cast<int>( s.result.winner ) );
+			Assert::AreEqual( 0, static_cast<int>( s.players[1].meldCount ), L"the pon never happened" );
+		}
+
+		TEST_METHOD( PonOutranksChi )
+		{
+			Engine engine( MahjongSoul4P(), 201 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId called = Id( RiichiMahjongTile::SOU_3 );
+			SetHand( s.players[0], "3s" );
+			s.players[0].drawn = MakeInstance( called );
+
+			SetHand( s.players[1], "129s" );  // the left neighbour, could chi
+			SetHand( s.players[2], "339s" );  // could pon
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( called ) ) );
+
+			engine.Step( Action::Chi( 1, Id( RiichiMahjongTile::SOU_1 ) ) );
+			engine.Step( Action::Pon( 2, called ) );
+
+			Assert::AreEqual( 2, static_cast<int>( s.currentPlayer ), L"the pon takes the turn" );
+			Assert::AreEqual( 1, static_cast<int>( s.players[2].meldCount ) );
+			Assert::IsTrue( s.players[2].melds[0].type == MeldType::PON );
+			Assert::AreEqual( 0, static_cast<int>( s.players[1].meldCount ), L"the chi never happened" );
+		}
+
+		TEST_METHOD( DoubleRonPaysBothClaimants )
+		{
+			Engine engine( MahjongSoul4P(), 202 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId winning = Id( RiichiMahjongTile::PIN_1 );
+			SetHand( s.players[0], "1p" );
+			s.players[0].drawn = MakeInstance( winning );
+			SetHand( s.players[1], TENPAI_13 );
+			SetHand( s.players[2], TENPAI_13 );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( winning ) ) );
+			engine.Step( Action::Ron( 1 ) );
+			Assert::IsTrue( engine.Step( Action::Ron( 2 ) ) == StepResult::HAND_ENDED );
+
+			Assert::IsTrue( s.result.outcome == HandOutcome::RON );
+			Assert::AreEqual( 0b0110, static_cast<int>( s.result.winnerMask ), L"both seats collect" );
+			Assert::AreEqual( 1, static_cast<int>( s.result.winner ), L"nearest the discarder heads the result" );
+			Assert::AreEqual( 0, static_cast<int>( s.result.loser ) );
+		}
+
+		TEST_METHOD( HeadBumpWhenDoubleRonIsDisabled )
+		{
+			Rules rules = MahjongSoul4P();
+			rules.doubleRon = false;
+
+			Engine engine( rules, 203 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId winning = Id( RiichiMahjongTile::PIN_1 );
+			SetHand( s.players[0], "1p" );
+			s.players[0].drawn = MakeInstance( winning );
+			SetHand( s.players[1], TENPAI_13 );
+			SetHand( s.players[2], TENPAI_13 );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( winning ) ) );
+			engine.Step( Action::Ron( 1 ) );
+			engine.Step( Action::Ron( 2 ) );
+
+			Assert::AreEqual( 0b0010, static_cast<int>( s.result.winnerMask ), L"only the nearest claimant" );
+			Assert::AreEqual( 1, static_cast<int>( s.result.winner ) );
+		}
+
+		TEST_METHOD( TripleRonAbortsTheHand )
+		{
+			Engine engine( MahjongSoul4P(), 204 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId winning = Id( RiichiMahjongTile::PIN_1 );
+			SetHand( s.players[0], "1p" );
+			s.players[0].drawn = MakeInstance( winning );
+			for ( uint8_t seat = 1; seat < 4; ++seat ) SetHand( s.players[seat], TENPAI_13 );
+
+			engine.Step( Action::Discard( 0, MakeInstance( winning ) ) );
+			engine.Step( Action::Ron( 1 ) );
+			engine.Step( Action::Ron( 2 ) );
+			Assert::IsTrue( engine.Step( Action::Ron( 3 ) ) == StepResult::HAND_ENDED );
+
+			Assert::IsTrue( s.result.outcome == HandOutcome::ABORT_TRIPLE_RON );
+			Assert::AreEqual( static_cast<int>( INVALID_SEAT ), static_cast<int>( s.result.winner ) );
+		}
+	};
+
+	TEST_CLASS( Kuikae )
+	{
+	public:
+		TEST_METHOD( TheClaimedTileCannotGoStraightBackOut )
+		{
+			Engine engine( MahjongSoul4P(), 300 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId called = Id( RiichiMahjongTile::SOU_3 );
+			SetHand( s.players[0], "3s" );
+			s.players[0].drawn = MakeInstance( called );
+			SetHand( s.players[1], "3339s" ); // pons and still holds a third 3s
+			SetHand( s.players[2], "1m" );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( called ) ) );
+			engine.Step( Action::Pon( 1, called ) );
+
+			Assert::AreEqual( 1, static_cast<int>( s.currentPlayer ) );
+
+			ActionList legal;
+			LegalActions( s, 1, legal );
+
+			Assert::IsFalse( legal.Contains( Action::Discard( 1, MakeInstance( called ) ) ),
+				L"swapping the claimed tile straight back is kuikae" );
+			Assert::IsTrue( legal.Contains( Action::Discard( 1, MakeInstance( Id( RiichiMahjongTile::SOU_9 ) ) ) ) );
+
+			Assert::IsTrue( engine.Step( Action::Discard( 1, MakeInstance( called ) ) ) == StepResult::ILLEGAL );
+		}
+
+		TEST_METHOD( AChiAtTheEndOfARunForbidsTheFarEnd )
+		{
+			Engine engine( MahjongSoul4P(), 301 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			// Seat 0 throws 1s, seat 1 chis it as 1s2s3s while holding a 4s.
+			const TileId called = Id( RiichiMahjongTile::SOU_1 );
+			SetHand( s.players[0], "1s" );
+			s.players[0].drawn = MakeInstance( called );
+			SetHand( s.players[1], "2349s" );
+			SetHand( s.players[2], "1m" );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( called ) ) );
+			engine.Step( Action::Chi( 1, called ) );
+
+			ActionList legal;
+			LegalActions( s, 1, legal );
+
+			// 4s would leave the same wait with the claimed tile swapped in.
+			Assert::IsFalse( legal.Contains( Action::Discard( 1, MakeInstance( Id( RiichiMahjongTile::SOU_4 ) ) ) ),
+				L"the far end of the run is barred too" );
+			Assert::IsTrue( legal.Contains( Action::Discard( 1, MakeInstance( Id( RiichiMahjongTile::SOU_9 ) ) ) ) );
+		}
+
+		TEST_METHOD( TheRestrictionLastsExactlyOneDiscard )
+		{
+			Engine engine( MahjongSoul4P(), 302 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId called = Id( RiichiMahjongTile::SOU_3 );
+			SetHand( s.players[0], "3s" );
+			s.players[0].drawn = MakeInstance( called );
+			SetHand( s.players[1], "3339s" );
+			SetHand( s.players[2], "1m" );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( called ) ) );
+			engine.Step( Action::Pon( 1, called ) );
+
+			Assert::AreNotEqual( uint64_t( 0 ), s.forbiddenDiscards );
+
+			engine.Step( Action::Discard( 1, MakeInstance( Id( RiichiMahjongTile::SOU_9 ) ) ) );
+			Assert::AreEqual( uint64_t( 0 ), s.forbiddenDiscards, L"cleared by the discard it constrained" );
+		}
+
+		TEST_METHOD( TheMaskCoversOnlyWhatItShould )
+		{
+			const TileId sou1 = Id( RiichiMahjongTile::SOU_1 );
+			const TileId sou3 = Id( RiichiMahjongTile::SOU_3 );
+			const TileId sou4 = Id( RiichiMahjongTile::SOU_4 );
+
+			// Claiming the bottom of 1s2s3s also bars 4s.
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::SOU_1, RiichiMahjongTile::SOU_4 } ),
+				KuikaeMask( MeldType::CHI, sou1, sou1 ) );
+
+			// Claiming the top of 1s2s3s bars nothing below, there being no 0s.
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::SOU_3 } ),
+				KuikaeMask( MeldType::CHI, sou1, sou3 ) );
+
+			// Claiming the middle bars only the tile itself.
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::SOU_4 } ),
+				KuikaeMask( MeldType::CHI, sou3, sou4 ) );
+
+			// A pon only ever bars its own tile.
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::SOU_3 } ),
+				KuikaeMask( MeldType::PON, sou3, sou3 ) );
+		}
+	};
+
+	TEST_CLASS( Chankan )
+	{
+	public:
+		TEST_METHOD( AnAddedKanCanBeRobbed )
+		{
+			Engine engine( MahjongSoul4P(), 400 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId kanTile = Id( RiichiMahjongTile::MAN_3 );
+
+			SetHand( s.players[0], "3m" );
+			GivePon( s.players[0], kanTile );
+			s.players[0].awaitingDiscard = true;
+
+			// Seat 2 is waiting on exactly that tile.
+			SetHand( s.players[2], "12456789m11123p" );
+			SetHand( s.players[1], "1m" );
+			SetHand( s.players[3], "1m" );
+
+			Assert::IsTrue( engine.Step( Action::Shouminkan( 0, kanTile ) ) == StepResult::OK );
+			Assert::IsTrue( s.awaitingChankan, L"the added tile is open to being robbed" );
+			Assert::IsTrue( s.phase == Phase::CALL );
+
+			Assert::IsTrue( engine.Step( Action::Ron( 2 ) ) == StepResult::HAND_ENDED );
+
+			Assert::IsTrue( s.result.outcome == HandOutcome::RON );
+			Assert::IsTrue( s.result.chankan );
+			Assert::AreEqual( 2, static_cast<int>( s.result.winner ) );
+			Assert::AreEqual( 0, static_cast<int>( s.result.loser ) );
+		}
+
+		TEST_METHOD( OnlyRonAndPassAnswerARobbableKan )
+		{
+			Engine engine( MahjongSoul4P(), 401 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId kanTile = Id( RiichiMahjongTile::MAN_3 );
+			SetHand( s.players[0], "3m" );
+			GivePon( s.players[0], kanTile );
+			s.players[0].awaitingDiscard = true;
+
+			// Seat 2 can rob it, which is what holds the window open.
+			SetHand( s.players[2], "12456789m11123p" );
+			SetHand( s.players[1], "3399m" ); // could otherwise pon a 3m
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Shouminkan( 0, kanTile ) );
+			Assert::IsTrue( s.awaitingChankan );
+
+			// The robber is offered a ron and nothing but a ron.
+			ActionList legal;
+			LegalActions( s, 2, legal );
+			Assert::IsTrue( legal.ContainsType( ActionType::RON ) );
+			Assert::IsTrue( legal.ContainsType( ActionType::PASS ) );
+			Assert::AreEqual( 2, static_cast<int>( legal.count ), L"only pass and ron answer a kan" );
+
+			// A tile that is already melded cannot be ponned out of the meld.
+			Assert::IsTrue( engine.Step( Action::Pon( 1, kanTile ) ) == StepResult::ILLEGAL );
+		}
+
+		TEST_METHOD( AnUnrobbedKanTakesItsReplacement )
+		{
+			Engine engine( MahjongSoul4P(), 402 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId kanTile = Id( RiichiMahjongTile::MAN_3 );
+			SetHand( s.players[0], "3m" );
+			GivePon( s.players[0], kanTile );
+			s.players[0].awaitingDiscard = true;
+
+			for ( uint8_t seat = 1; seat < 4; ++seat ) SetHand( s.players[seat], "1m" );
+
+			const int drawsBefore = s.LiveWallRemaining();
+
+			// Nobody can rob it, so the window closes inside the same step.
+			Assert::IsTrue( engine.Step( Action::Shouminkan( 0, kanTile ) ) == StepResult::OK );
+
+			Assert::IsFalse( s.awaitingChankan );
+			Assert::IsTrue( s.phase == Phase::DISCARD );
+			Assert::AreEqual( 0, static_cast<int>( s.currentPlayer ) );
+			Assert::AreEqual( 1, static_cast<int>( s.deadWallDraws ) );
+			Assert::AreEqual( drawsBefore - 1, static_cast<int>( s.LiveWallRemaining() ) );
+			Assert::IsTrue( s.pendingDoraFlip, L"an added kan flips only after the discard" );
+			Assert::IsTrue( s.players[0].melds[0].type == MeldType::SHOUMINKAN );
+		}
+	};
+
+	TEST_CLASS( RiichiLegality )
+	{
+	public:
+		TEST_METHOD( RiichiNeedsTenpai )
+		{
+			Engine engine( MahjongSoul4P(), 500 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			// Nowhere near tenpai.
+			SetHand( s.players[0], "159m159p159s1234z" );
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::EAST ) );
+
+			ActionList legal;
+			LegalActions( s, 0, legal );
+			Assert::IsFalse( legal.ContainsType( ActionType::RIICHI ) );
+		}
+
+		TEST_METHOD( RiichiOnlyOffersDiscardsThatLeaveTenpai )
+		{
+			Engine engine( MahjongSoul4P(), 501 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			SetHand( s.players[0], "123456789m1123p9s" );
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::SOU_9 ) );
+
+			ActionList legal;
+			LegalActions( s, 0, legal );
+
+			// Two discards keep the hand tenpai: shedding the 9s waits on 1p and
+			// 4p, and shedding a 1p leaves a tanki on the 9s. Nothing else does.
+			uint64_t offered = 0;
+			for ( const Action &a : legal )
+			{
+				if ( a.type == ActionType::RIICHI ) offered |= ( 1ULL << InstanceTile( a.tile ) );
+			}
+
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::SOU_9, RiichiMahjongTile::PIN_1 } ), offered );
+		}
+
+		TEST_METHOD( RiichiNeedsFourTilesLeftInTheWall )
+		{
+			Engine engine( MahjongSoul4P(), 502 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			SetHand( s.players[0], "123456789m1123p9s" );
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::SOU_9 ) );
+			s.liveWallHead = static_cast<uint8_t>( s.liveWallTail - 3 );
+
+			ActionList legal;
+			LegalActions( s, 0, legal );
+			Assert::IsFalse( legal.ContainsType( ActionType::RIICHI ), L"three tiles is not enough" );
+
+			s.liveWallHead = static_cast<uint8_t>( s.liveWallTail - 4 );
+			LegalActions( s, 0, legal );
+			Assert::IsTrue( legal.ContainsType( ActionType::RIICHI ) );
+		}
+
+		TEST_METHOD( AnkanDuringRiichiMustNotDisturbTheWait )
+		{
+			Engine engine( MahjongSoul4P(), 503 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			// 111m 456m 789m 11p 23p waits on 1p and 4p; a fourth 1m changes
+			// nothing about that.
+			SetHand( s.players[0], "1111456789m1123p" );
+			s.players[0].drawn          = MakeInstance( Id( RiichiMahjongTile::MAN_1 ) );
+			s.players[0].riichiDeclared = true;
+
+			ActionList legal;
+			LegalActions( s, 0, legal );
+			Assert::IsTrue( legal.Contains( Action::Ankan( 0, Id( RiichiMahjongTile::MAN_1 ) ) ),
+				L"the wait is untouched, so the kan is allowed" );
+
+			// The same four tiles, but they are not what was just drawn.
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::PIN_2 ) );
+			LegalActions( s, 0, legal );
+			Assert::IsFalse( legal.ContainsType( ActionType::ANKAN ),
+				L"a declared hand may only kan the tile it just drew" );
+		}
+
+		TEST_METHOD( ADeclaredHandCannotCall )
+		{
+			Engine engine( MahjongSoul4P(), 504 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			const TileId called = Id( RiichiMahjongTile::SOU_3 );
+			SetHand( s.players[0], "3s" );
+			s.players[0].drawn = MakeInstance( called );
+
+			SetHand( s.players[1], "3339s" );
+			s.players[1].riichiDeclared = true;
+			SetHand( s.players[2], "1m" );
+			SetHand( s.players[3], "1m" );
+
+			engine.Step( Action::Discard( 0, MakeInstance( called ) ) );
+
+			ActionList legal;
+			LegalActions( s, 1, legal );
+			Assert::IsFalse( legal.ContainsType( ActionType::PON ), L"riichi locks the hand" );
+			Assert::IsFalse( legal.ContainsType( ActionType::CHI ) );
+		}
+	};
+
+	// -----------------------------------------------------------------
+	// The invariant that holds generation and application together. If
+	// these two ever disagree, a search will either explore states the
+	// engine refuses to enter or miss states it would accept.
+	// -----------------------------------------------------------------
+	TEST_CLASS( GenerationMatchesApplication )
+	{
+	public:
+		TEST_METHOD( EveryGeneratedActionIsAccepted )
+		{
+			Engine engine( MahjongSoul4P(), 4242 );
+			engine.StartHand( 0 );
+
+			int guard = 0;
+			int checked = 0;
+
+			while ( engine.State().phase != Phase::HAND_OVER && guard++ < 2000 )
+			{
+				const GameState &s = engine.State();
+
+				const uint8_t actingSeat = ( s.phase == Phase::DISCARD )
+					? s.currentPlayer
+					: static_cast<uint8_t>( [&]
+						{
+							for ( uint8_t seat = 0; seat < s.PlayerCount(); ++seat )
+							{
+								if ( ( s.pendingCallers & ( 1u << seat ) ) != 0 ) return seat;
+							}
+							return INVALID_SEAT;
+						}( ) );
+
+				Assert::IsTrue( actingSeat < s.PlayerCount(), L"somebody must be able to act" );
+
+				ActionList legal;
+				LegalActions( s, actingSeat, legal );
+				Assert::IsTrue( legal.count > 0, L"a live state must offer at least one action" );
+
+				// Each option must be accepted, tried against its own copy so
+				// the real hand is not disturbed.
+				for ( const Action &a : legal )
+				{
+					Engine probe = engine;
+					const StepResult r = probe.Step( a );
+					Assert::IsTrue( r != StepResult::ILLEGAL, L"a generated action must be accepted" );
+					++checked;
+				}
+
+				engine.Step( legal[0] );
+			}
+
+			Assert::IsTrue( checked > 100, L"the walk should have covered real ground" );
+		}
+
+		TEST_METHOD( UngeneratedActionsAreRejected )
+		{
+			Engine engine( MahjongSoul4P(), 4243 );
+			engine.StartHand( 0 );
+
+			const GameState &s = engine.State();
+
+			ActionList legal;
+			LegalActions( s, 0, legal );
+
+			// Probe the whole action space and confirm Step agrees exactly with
+			// what was generated.
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				const Action candidates[] = {
+					Action::Discard( 0, MakeInstance( t ) ),
+					Action::Riichi( 0, MakeInstance( t ) ),
+					Action::Ankan( 0, t ),
+					Action::Shouminkan( 0, t ),
+					Action::Pon( 0, t ),
+					Action::Chi( 0, t ),
+				};
+
+				for ( const Action &a : candidates )
+				{
+					Engine probe = engine;
+					const bool generated = legal.Contains( a );
+					const bool accepted  = probe.Step( a ) != StepResult::ILLEGAL;
+
+					Assert::AreEqual( generated, accepted, L"Step and LegalActions must agree" );
+				}
+			}
+		}
+
+		TEST_METHOD( SeatsWithNoTurnGetNoActions )
+		{
+			Engine engine( MahjongSoul4P(), 4244 );
+			engine.StartHand( 0 );
+
+			const GameState &s = engine.State();
+			ActionList legal;
+
+			for ( uint8_t seat = 1; seat < 4; ++seat )
+			{
+				Assert::AreEqual( 0, static_cast<int>( LegalActions( s, seat, legal ) ),
+					L"it is not their turn" );
+			}
+
+			Assert::IsTrue( LegalActions( s, 0, legal ) > 0 );
 		}
 	};
 }
