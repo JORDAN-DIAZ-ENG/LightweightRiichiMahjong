@@ -202,6 +202,71 @@ namespace
 		std::cout << "\n\n";
 	}
 
+	// Plays part of a hand, then shows what one seat could work out about it.
+	void ShowBelief( const uint64_t seed, const uint8_t viewer, const int turns )
+	{
+		Engine engine( MahjongSoul4P(), seed );
+		engine.EnableEventLog( true );
+		engine.StartHand( 0 );
+
+		int played = 0;
+		while ( engine.State().phase != Phase::HAND_OVER && played < turns )
+		{
+			const GameState &s = engine.State();
+
+			if ( s.phase == Phase::DISCARD )
+			{
+				engine.Step( Action::Discard( s.currentPlayer, s.players[s.currentPlayer].drawn ) );
+				++played;
+			}
+			else
+			{
+				for ( uint8_t seat = 0; seat < s.PlayerCount(); ++seat )
+				{
+					if ( ( s.pendingCallers & ( 1u << seat ) ) != 0 ) engine.Step( Action::Pass( seat ) );
+				}
+			}
+		}
+
+		const Observation obs = engine.ViewFor( viewer );
+
+		Belief belief;
+		belief.BuildFrom( obs );
+
+		int unseenTotal = 0;
+		for ( TileId t = 0; t < TILE_KIND_COUNT; ++t ) unseenTotal += belief.unseen[t];
+
+		std::cout << "Seat " << static_cast<int>( viewer ) << " after " << turns << " discards\n";
+		std::cout << "    events seen  : " << obs.eventCount << "\n";
+		std::cout << "    own hand     : " << belief.publicState.players[viewer].hand.ToTenhouString() << "\n";
+		std::cout << "    tiles unseen : " << unseenTotal << "\n";
+		std::cout << "    opponents    :";
+		for ( uint8_t seat = 0; seat < 4; ++seat )
+		{
+			if ( seat == viewer ) continue;
+			std::cout << " seat" << static_cast<int>( seat ) << "=" << static_cast<int>( belief.hands[seat].size );
+		}
+		std::cout << " tiles\n";
+
+		// Three sampled worlds, to show the same evidence admits many.
+		Rng rng( seed ^ 0x5eed );
+		for ( int sample = 0; sample < 3; ++sample )
+		{
+			GameState world;
+			if ( !Determinize( belief, rng, world ) )
+			{
+				std::cout << "    sample " << sample << "   : no consistent world found\n";
+				continue;
+			}
+
+			const uint8_t other = static_cast<uint8_t>( ( viewer + 1 ) % 4 );
+			std::cout << "    sample " << sample << "     : seat" << static_cast<int>( other ) << " could hold "
+				<< world.players[other].hand.ToTenhouString() << "\n";
+		}
+
+		std::cout << "\n";
+	}
+
 	void RunHand( const char *label, const Rules &rules, const uint64_t seed )
 	{
 		Engine engine( rules, seed );
@@ -295,6 +360,8 @@ int main()
 	ShowScore( "234567m234567p11s", "2m", false );
 	ShowScore( "123456789m11123p", "1p", true );
 	ShowScore( "119m19p19s1234567z", "1m", false );
+
+	ShowBelief( 20260824, 0, 12 );
 
 	BenchmarkShanten();
 

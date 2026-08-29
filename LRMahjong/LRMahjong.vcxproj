@@ -39,6 +39,7 @@
     <ClCompile Include="src\LRMahjong\Model\Shanten.cpp" />
     <ClCompile Include="src\LRMahjong\Model\HandParse.cpp" />
     <ClCompile Include="src\LRMahjong\Model\Score.cpp" />
+    <ClCompile Include="src\LRMahjong\Model\Observation.cpp" />
     <ClCompile Include="src\LRMahjong\Model\WinCheck.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

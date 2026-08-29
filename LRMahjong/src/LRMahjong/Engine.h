@@ -7,6 +7,7 @@
 #include "Model/Action.h"
 #include "Model/GameState.h"
 #include "Model/LegalActions.h"
+#include "Model/Observation.h"
 #include "Model/Rules.h"
 
 namespace LRMahjong
@@ -49,6 +50,16 @@ namespace LRMahjong
 
 		const Model::Rules      &GetRules() const { return _rules; }
 		const Model::HandResult &Result() const   { return _state.result; }
+
+		// Event recording is off by default: a rollout has no use for it, and an
+		// Observation is eight kilobytes that would be copied with the engine.
+		LRM_API void EnableEventLog( bool enabled );
+
+		const Model::Observation &EventLog() const { return _log; }
+
+		// The log redacted to what one seat could actually have seen: other
+		// seats keep their draws as events, but not the tiles.
+		LRM_API Model::Observation ViewFor( uint8_t viewer ) const;
 
 		Rng &Random() { return _rng; }
 
@@ -104,8 +115,20 @@ namespace LRMahjong
 		bool FourRiichiAbort() const;
 		bool FourWindsAbort() const;
 
+		void Record( const Model::Event &e );
+		void RevealDora();
+
 		Model::Rules     _rules;
 		Model::GameState _state{};
+
+		// Recorded at the deal so ViewFor can hand back the seat's own opening
+		// hand, which no event ever carries.
+		Model::Counts34 _startingHands[Model::MAX_PLAYERS]{};
+		Model::AkaMask  _startingAka[Model::MAX_PLAYERS]{};
+
+		Model::Observation _log{};
+		bool               _logging = false;
+
 		Rng              _rng;
 		uint64_t         _seed = 0;
 	};

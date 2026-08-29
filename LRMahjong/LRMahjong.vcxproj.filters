@@ -89,6 +89,9 @@
     <ClCompile Include="src\LRMahjong\Model\Score.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\LRMahjong\Model\Observation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\LRMahjong\Model\WinCheck.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
