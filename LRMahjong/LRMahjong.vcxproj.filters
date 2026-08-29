@@ -42,6 +42,9 @@
     <ClInclude Include="src\LRMahjong\Model\LegalActions.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\LRMahjong\Model\Shanten.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="src\LRMahjong\Model\WinCheck.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -69,6 +72,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\LRMahjong\Model\LegalActions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\LRMahjong\Model\Shanten.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\LRMahjong\Model\WinCheck.cpp">

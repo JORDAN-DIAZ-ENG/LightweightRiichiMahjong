@@ -176,6 +176,11 @@ namespace LRMahjong::Model
 		// discards, pulled Norths and the face-up dora indicators. The
 		// complement of this is the pool the observation layer samples from.
 		LRM_API Counts34 VisibleTo( uint8_t viewer ) const;
+
+		// The complement of VisibleTo: copies of each kind the viewer has not
+		// accounted for, and so could still draw or be dealt into. This is both
+		// the weight behind ukeire and the pool the belief layer samples from.
+		LRM_API Counts34 UnseenFrom( uint8_t viewer ) const;
 	};
 
 	// A rollout copies this type; if either assertion ever fails, the copy has

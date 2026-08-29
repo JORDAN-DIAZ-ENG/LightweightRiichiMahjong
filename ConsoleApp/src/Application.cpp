@@ -104,6 +104,65 @@ namespace
 		}
 	}
 
+	void ShowUkeire( const char *tenhou )
+	{
+		Counts34 hand{};
+		AkaMask  aka = AKA_NONE;
+		if ( !CountsFromTenhouString( tenhou, hand, aka ) ) return;
+
+		// Nothing seen but the hand itself.
+		Counts34 remaining{};
+		for ( TileId t = 0; t < TILE_KIND_COUNT; ++t ) remaining[t] = static_cast<uint8_t>( 4 - hand[t] );
+
+		const UkeireResult result = UkeireAgainst( hand, 0, remaining );
+
+		std::cout << tenhou << "\n";
+		std::cout << "    shanten : " << static_cast<int>( result.shanten ) << "\n";
+		std::cout << "    accepts :";
+
+		for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+		{
+			if ( ( result.tiles & ( 1ULL << t ) ) != 0 ) std::cout << " " << TileToString( t );
+		}
+
+		std::cout << "  (" << result.copies << " tiles)\n\n";
+	}
+
+	void BenchmarkShanten()
+	{
+		// A spread of real-ish hands rather than one shape, so the timing is not
+		// dominated by whichever branch happens to be cheapest.
+		constexpr int HANDS = 20000;
+
+		Rng rng( 12345 );
+		Counts34 hands[256];
+
+		for ( auto &hand : hands )
+		{
+			Engine engine( MahjongSoul4P(), rng.NextU64() );
+			engine.StartHand( 0 );
+			hand = engine.State().players[0].hand.Counts();
+		}
+
+		int checksum = 0;
+		const auto start = std::chrono::steady_clock::now();
+
+		for ( int i = 0; i < HANDS; ++i )
+		{
+			checksum += Shanten( hands[i % 256], 0 );
+		}
+
+		const auto elapsed = std::chrono::steady_clock::now() - start;
+		const double us = std::chrono::duration<double, std::micro>( elapsed ).count();
+
+		std::cout << "Shanten: " << HANDS << " calls in " << us << " us ("
+			<< ( us / HANDS ) << " us each, "
+			<< static_cast<long long>( HANDS / ( us / 1e6 ) ) << " per second)\n";
+
+		// Keeps the loop from being optimised away.
+		if ( checksum == INT32_MIN ) std::cout << "";
+	}
+
 	void RunHand( const char *label, const Rules &rules, const uint64_t seed )
 	{
 		Engine engine( rules, seed );
@@ -188,6 +247,13 @@ int main()
 		if ( outcomes[i] == 0 ) continue;
 		std::cout << "    " << OutcomeName( static_cast<HandOutcome>( i ) ) << ": " << outcomes[i] << "\n";
 	}
+
+	std::cout << "\n";
+	ShowUkeire( "123456789m1123p" );
+	ShowUkeire( "13m456789m11123p" );
+	ShowUkeire( "147m258p369s1234z" );
+
+	BenchmarkShanten();
 
 	return 0;
 }

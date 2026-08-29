@@ -14,5 +14,6 @@
 #include "LRMahjong/Model/Observation.h"
 #include "LRMahjong/Model/Player.h"
 #include "LRMahjong/Model/Rules.h"
+#include "LRMahjong/Model/Shanten.h"
 #include "LRMahjong/Model/Tile.h"
 #include "LRMahjong/Model/WinCheck.h"
