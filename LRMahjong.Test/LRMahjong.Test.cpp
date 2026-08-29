@@ -2855,4 +2855,512 @@ namespace LRMahjongTest
 			}
 		}
 	};
+
+	// =================================================================
+	// M4: decomposition, yaku, fu and points.
+	// =================================================================
+
+	namespace
+	{
+		// South seat in an east round, non-dealer, so no wind yaku fires by
+		// accident and the payment split is the ordinary one.
+		WinContext BaseContext( const bool tsumo, const char *winningTile )
+		{
+			WinContext ctx;
+			ctx.rules       = MahjongSoul4P();
+			ctx.byTsumo     = tsumo;
+			ctx.winningTile = MakeInstance( TileFromTenhouString( winningTile ) );
+			ctx.seatWind    = 1; // south
+			ctx.roundWind   = 0; // east
+			ctx.isDealer    = false;
+			return ctx;
+		}
+
+		ScoreResult ScoreClosed( const char *hand, const WinContext &ctx )
+		{
+			return ScoreHand( CountsOf( hand ), nullptr, 0, ctx );
+		}
+
+		bool Holds( const ScoreResult &r, const Yaku y ) { return ( r.yaku & YakuBit( y ) ) != 0; }
+	}
+
+	TEST_CLASS( Decomposition_ )
+	{
+	public:
+		TEST_METHOD( AHandCanReadMoreThanOneWay )
+		{
+			// 111222333m is three triplets or three identical runs, and the two
+			// readings score differently.
+			DecompositionList readings;
+			Assert::IsTrue( Decompose( CountsOf( "111222333m44455p" ), nullptr, 0, readings ) >= 2 );
+
+			bool sawTriplets = false;
+			bool sawRuns     = false;
+
+			for ( const Decomposition &d : readings )
+			{
+				int runs = 0;
+				int triplets = 0;
+
+				for ( uint8_t i = 0; i < d.setCount; ++i )
+				{
+					if ( d.sets[i].type == SetType::RUN ) ++runs;
+					if ( d.sets[i].type == SetType::TRIPLET ) ++triplets;
+				}
+
+				if ( runs >= 3 ) sawRuns = true;
+				if ( triplets >= 3 ) sawTriplets = true;
+			}
+
+			Assert::IsTrue( sawRuns && sawTriplets, L"both readings must be offered" );
+		}
+
+		TEST_METHOD( CalledSetsAppearInEveryReading )
+		{
+			Meld melds[1];
+			melds[0].type = MeldType::PON;
+			melds[0].base = Id( RiichiMahjongTile::WHITE_DRAGON );
+
+			DecompositionList readings;
+			Assert::IsTrue( Decompose( CountsOf( "123456789m11p" ), melds, 1, readings ) > 0 );
+
+			for ( const Decomposition &d : readings )
+			{
+				Assert::AreEqual( 5, static_cast<int>( d.setCount ) );
+
+				bool foundCall = false;
+				for ( uint8_t i = 0; i < d.setCount; ++i )
+				{
+					if ( d.sets[i].fromCall )
+					{
+						foundCall = true;
+						Assert::IsFalse( d.sets[i].concealed, L"a pon is open" );
+					}
+				}
+
+				Assert::IsTrue( foundCall );
+			}
+		}
+
+		TEST_METHOD( SpecialFormsAreTheirOwnReading )
+		{
+			DecompositionList pairs;
+			Decompose( CountsOf( "1133557799m1133p" ), nullptr, 0, pairs );
+			Assert::IsTrue( pairs.count > 0 );
+			Assert::IsTrue( pairs.items[0].sevenPairs );
+
+			DecompositionList orphans;
+			Decompose( CountsOf( "119m19p19s1234567z" ), nullptr, 0, orphans );
+			Assert::IsTrue( orphans.count > 0 );
+			Assert::IsTrue( orphans.items[0].thirteenOrphans );
+		}
+
+		TEST_METHOD( AnIncompleteHandHasNoReading )
+		{
+			DecompositionList readings;
+			Assert::AreEqual( 0, static_cast<int>( Decompose( CountsOf( "123456789m11223p" ), nullptr, 0, readings ) ) );
+		}
+	};
+
+	TEST_CLASS( DoraIndicators )
+	{
+	public:
+		TEST_METHOD( TheIndicatorPointsAtTheNextTile )
+		{
+			Assert::AreEqual( static_cast<int>( Id( RiichiMahjongTile::MAN_2 ) ),
+				static_cast<int>( DoraFromIndicator( Id( RiichiMahjongTile::MAN_1 ) ) ) );
+			Assert::AreEqual( static_cast<int>( Id( RiichiMahjongTile::PIN_6 ) ),
+				static_cast<int>( DoraFromIndicator( Id( RiichiMahjongTile::PIN_5 ) ) ) );
+		}
+
+		TEST_METHOD( EachGroupWrapsWithinItself )
+		{
+			// Nine wraps to one, and does not spill into the next suit.
+			Assert::AreEqual( static_cast<int>( Id( RiichiMahjongTile::MAN_1 ) ),
+				static_cast<int>( DoraFromIndicator( Id( RiichiMahjongTile::MAN_9 ) ) ) );
+			Assert::AreEqual( static_cast<int>( Id( RiichiMahjongTile::SOU_1 ) ),
+				static_cast<int>( DoraFromIndicator( Id( RiichiMahjongTile::SOU_9 ) ) ) );
+
+			// North wraps to east, and the dragons wrap among themselves.
+			Assert::AreEqual( static_cast<int>( Id( RiichiMahjongTile::EAST ) ),
+				static_cast<int>( DoraFromIndicator( Id( RiichiMahjongTile::NORTH ) ) ) );
+			Assert::AreEqual( static_cast<int>( Id( RiichiMahjongTile::WHITE_DRAGON ) ),
+				static_cast<int>( DoraFromIndicator( Id( RiichiMahjongTile::RED_DRAGON ) ) ) );
+		}
+	};
+
+	TEST_CLASS( YakuDetection )
+	{
+	public:
+		TEST_METHOD( Pinfu )
+		{
+			// All runs, a valueless pair, and a two-sided wait completed by the 2m.
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", BaseContext( false, "2m" ) );
+
+			Assert::IsTrue( r.valid );
+			Assert::IsTrue( Holds( r, Yaku::PINFU ) );
+			Assert::AreEqual( 1, static_cast<int>( r.han ) );
+			Assert::AreEqual( 30, static_cast<int>( r.fu ), L"a closed pinfu ron is thirty" );
+		}
+
+		TEST_METHOD( PinfuTsumoIsTwentyFu )
+		{
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", BaseContext( true, "2m" ) );
+
+			Assert::IsTrue( Holds( r, Yaku::PINFU ) );
+			Assert::IsTrue( Holds( r, Yaku::MENZEN_TSUMO ) );
+			Assert::AreEqual( 20, static_cast<int>( r.fu ) );
+			Assert::AreEqual( 2, static_cast<int>( r.han ) );
+		}
+
+		TEST_METHOD( Tanyao )
+		{
+			const ScoreResult r = ScoreClosed( "234567m234567p22s", BaseContext( false, "2m" ) );
+
+			Assert::IsTrue( Holds( r, Yaku::TANYAO ) );
+			Assert::IsTrue( Holds( r, Yaku::PINFU ) );
+			Assert::AreEqual( 2, static_cast<int>( r.han ) );
+		}
+
+		TEST_METHOD( YakuhaiOnTheRoundWind )
+		{
+			// East triplet in an east round, held by the south seat.
+			const ScoreResult r = ScoreClosed( "234567m234p11s111z", BaseContext( false, "2m" ) );
+
+			Assert::IsTrue( Holds( r, Yaku::YAKUHAI_ROUND ) );
+			Assert::IsFalse( Holds( r, Yaku::YAKUHAI_SEAT ), L"east is not this seat's wind" );
+			Assert::IsFalse( Holds( r, Yaku::PINFU ), L"a yakuhai triplet rules out pinfu" );
+		}
+
+		TEST_METHOD( SevenPairsIsTwoHanTwentyFiveFu )
+		{
+			const ScoreResult r = ScoreClosed( "1133557799m1133p", BaseContext( false, "3p" ) );
+
+			Assert::IsTrue( Holds( r, Yaku::CHIITOITSU ) );
+			Assert::AreEqual( 2, static_cast<int>( r.han ) );
+			Assert::AreEqual( 25, static_cast<int>( r.fu ) );
+		}
+
+		TEST_METHOD( Ittsuu )
+		{
+			const ScoreResult r = ScoreClosed( "123456789m11123p", BaseContext( false, "1p" ) );
+
+			Assert::IsTrue( Holds( r, Yaku::ITTSUU ) );
+			Assert::IsTrue( Holds( r, Yaku::PINFU ) );
+			Assert::AreEqual( 3, static_cast<int>( r.han ), L"ittsuu is two closed, plus pinfu" );
+		}
+
+		TEST_METHOD( SanshokuDoujun )
+		{
+			const ScoreResult r = ScoreClosed( "123m123p123777s55z", BaseContext( false, "3s" ) );
+			Assert::IsTrue( Holds( r, Yaku::SANSHOKU_DOUJUN ) );
+		}
+
+		TEST_METHOD( ToitoiAndSanankou )
+		{
+			// Ron on the 5s, so that triplet was never concealed: three
+			// concealed triplets rather than four.
+			const ScoreResult r = ScoreClosed( "111999m333p555s77z", BaseContext( false, "5s" ) );
+
+			Assert::IsTrue( Holds( r, Yaku::TOITOI ) );
+			Assert::IsTrue( Holds( r, Yaku::SANANKOU ) );
+			Assert::IsFalse( Holds( r, Yaku::SUUANKOU ) );
+		}
+
+		TEST_METHOD( HonitsuAndChinitsu )
+		{
+			const ScoreResult honitsu = ScoreClosed( "11122345678999m", BaseContext( false, "9m" ) );
+			Assert::IsTrue( Holds( honitsu, Yaku::CHINITSU ) || Holds( honitsu, Yaku::CHUUREN ) );
+
+			const ScoreResult mixed = ScoreClosed( "123456789m11177z", BaseContext( false, "7z" ) );
+			Assert::IsTrue( Holds( mixed, Yaku::HONITSU ) );
+			Assert::IsFalse( Holds( mixed, Yaku::CHINITSU ) );
+		}
+
+		TEST_METHOD( ADoraOnlyHandIsNotAWin )
+		{
+			// A complete shape with nothing to claim: open, all simples barred
+			// by a terminal pair, no yakuhai, no shape yaku.
+			Meld melds[3];
+			melds[0].type = MeldType::CHI; melds[0].base = Id( RiichiMahjongTile::MAN_2 );
+			melds[1].type = MeldType::CHI; melds[1].base = Id( RiichiMahjongTile::PIN_5 );
+			melds[2].type = MeldType::CHI; melds[2].base = Id( RiichiMahjongTile::SOU_3 );
+
+			WinContext ctx = BaseContext( false, "8s" );
+			const ScoreResult r = ScoreHand( CountsOf( "678s11m" ), melds, 3, ctx );
+
+			Assert::IsFalse( r.valid, L"a complete shape with no yaku is not a win" );
+			Assert::AreEqual( 0, r.points );
+		}
+
+		TEST_METHOD( DoraAloneNeverCreatesAWin )
+		{
+			Meld melds[3];
+			melds[0].type = MeldType::CHI; melds[0].base = Id( RiichiMahjongTile::MAN_2 );
+			melds[1].type = MeldType::CHI; melds[1].base = Id( RiichiMahjongTile::PIN_5 );
+			melds[2].type = MeldType::CHI; melds[2].base = Id( RiichiMahjongTile::SOU_3 );
+
+			WinContext ctx = BaseContext( false, "8s" );
+			ctx.doraIndicators[0]  = MakeInstance( Id( RiichiMahjongTile::MAN_9 ) ); // 1m is dora
+			ctx.doraIndicatorCount = 1;
+
+			const ScoreResult r = ScoreHand( CountsOf( "678s11m" ), melds, 3, ctx );
+			Assert::IsFalse( r.valid, L"dora is not a yaku" );
+		}
+	};
+
+	TEST_CLASS( Yakuman )
+	{
+	public:
+		TEST_METHOD( ThirteenOrphans )
+		{
+			const ScoreResult r = ScoreClosed( "119m19p19s1234567z", BaseContext( false, "1m" ) );
+
+			Assert::IsTrue( r.valid );
+			Assert::IsTrue( Holds( r, Yaku::KOKUSHI ) );
+			Assert::AreEqual( 1, static_cast<int>( r.yakumanCount ) );
+			Assert::AreEqual( 32000, r.points, L"a non-dealer yakuman ron" );
+		}
+
+		TEST_METHOD( FourConcealedTriplets )
+		{
+			const ScoreResult r = ScoreClosed( "111999m333p555s77z", BaseContext( true, "5s" ) );
+
+			Assert::IsTrue( Holds( r, Yaku::SUUANKOU ) );
+			Assert::AreEqual( 1, static_cast<int>( r.yakumanCount ) );
+		}
+
+		TEST_METHOD( AllHonours )
+		{
+			const ScoreResult r = ScoreClosed( "11122233355566z", BaseContext( false, "5z" ) );
+			Assert::IsTrue( Holds( r, Yaku::TSUUIISOU ) );
+		}
+
+		TEST_METHOD( AYakumanReplacesTheHanCount )
+		{
+			// The hand also holds toitoi and yakuhai, but they do not add to a
+			// yakuman.
+			const ScoreResult r = ScoreClosed( "11122233355566z", BaseContext( false, "5z" ) );
+
+			Assert::IsFalse( Holds( r, Yaku::TOITOI ) );
+			Assert::AreEqual( 13, static_cast<int>( r.han ) );
+		}
+
+		TEST_METHOD( DealerYakumanIsFortyEightThousand )
+		{
+			WinContext ctx = BaseContext( false, "1m" );
+			ctx.isDealer = true;
+
+			const ScoreResult r = ScoreClosed( "119m19p19s1234567z", ctx );
+			Assert::AreEqual( 48000, r.points );
+		}
+	};
+
+	TEST_CLASS( Payments )
+	{
+	public:
+		TEST_METHOD( TheStandardRonTable )
+		{
+			// 1 han 30 fu, non-dealer ron.
+			const ScoreResult one = ScoreClosed( "234567m234567p11s", BaseContext( false, "2m" ) );
+			Assert::AreEqual( 1,    static_cast<int>( one.han ) );
+			Assert::AreEqual( 30,   static_cast<int>( one.fu ) );
+			Assert::AreEqual( 1000, one.points );
+
+			// 2 han 30 fu, non-dealer ron.
+			const ScoreResult two = ScoreClosed( "234567m234567p22s", BaseContext( false, "2m" ) );
+			Assert::AreEqual( 2,    static_cast<int>( two.han ) );
+			Assert::AreEqual( 2000, two.points );
+		}
+
+		TEST_METHOD( TheDealerCollectsHalfAgain )
+		{
+			WinContext ctx = BaseContext( false, "2m" );
+			ctx.isDealer = true;
+
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", ctx );
+			Assert::AreEqual( 1500, r.points, L"1 han 30 fu, dealer ron" );
+		}
+
+		TEST_METHOD( TsumoSplitsBetweenTheDealerAndTheRest )
+		{
+			// 2 han 20 fu tsumo: base 320, so 700 from the dealer and 400 each.
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", BaseContext( true, "2m" ) );
+
+			Assert::AreEqual( 2,  static_cast<int>( r.han ) );
+			Assert::AreEqual( 20, static_cast<int>( r.fu ) );
+			Assert::AreEqual( 700, r.fromDealer );
+			Assert::AreEqual( 400, r.fromEachOther );
+			Assert::AreEqual( 1500, r.points, L"700 plus two lots of 400" );
+		}
+
+		TEST_METHOD( ADealerTsumoTakesTheSameFromEveryone )
+		{
+			WinContext ctx = BaseContext( true, "2m" );
+			ctx.isDealer = true;
+
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", ctx );
+
+			Assert::AreEqual( 700, r.fromEachOther );
+			Assert::AreEqual( 2100, r.points );
+		}
+
+		TEST_METHOD( HonbaAndSticksRideOnTop )
+		{
+			WinContext ctx = BaseContext( false, "2m" );
+			ctx.honba        = 2;
+			ctx.riichiSticks = 1;
+
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", ctx );
+
+			// 1000 for the hand, 600 for two honba, 1000 for the stick.
+			Assert::AreEqual( 1600, r.fromDiscarder );
+			Assert::AreEqual( 2600, r.points );
+		}
+
+		TEST_METHOD( HonbaOnATsumoIsPerPlayer )
+		{
+			WinContext ctx = BaseContext( true, "2m" );
+			ctx.honba = 1;
+
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", ctx );
+
+			Assert::AreEqual( 800, r.fromDealer );
+			Assert::AreEqual( 500, r.fromEachOther );
+		}
+
+		TEST_METHOD( ManganCapsTheBaseValue )
+		{
+			// Five han is mangan however the fu falls.
+			WinContext ctx = BaseContext( false, "1p" );
+			ctx.doraIndicators[0]  = MakeInstance( Id( RiichiMahjongTile::MAN_9 ) );
+			ctx.doraIndicators[1]  = MakeInstance( Id( RiichiMahjongTile::MAN_9 ) );
+			ctx.doraIndicatorCount = 2;
+
+			// Ittsuu and pinfu, plus two dora on the single 1m.
+			const ScoreResult r = ScoreClosed( "123456789m11123p", ctx );
+
+			Assert::AreEqual( 2, static_cast<int>( r.doraHan ) );
+			Assert::AreEqual( 5, static_cast<int>( r.han ) );
+			Assert::AreEqual( 8000, r.points, L"five han is mangan whatever the fu" );
+		}
+	};
+
+	TEST_CLASS( DoraCounting )
+	{
+	public:
+		TEST_METHOD( IndicatorsAkaAndNukiAllCount )
+		{
+			WinContext ctx = BaseContext( false, "2m" );
+			ctx.doraIndicators[0]  = MakeInstance( Id( RiichiMahjongTile::MAN_1 ) ); // 2m is dora
+			ctx.doraIndicatorCount = 1;
+			ctx.akaCount           = 1;
+
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", ctx );
+
+			// One 2m in the hand, plus the red five.
+			Assert::AreEqual( 2, static_cast<int>( r.doraHan ) );
+			Assert::AreEqual( 3, static_cast<int>( r.han ), L"pinfu plus two dora" );
+		}
+
+		TEST_METHOD( UraOnlyCountsForARiichiHand )
+		{
+			WinContext ctx = BaseContext( false, "2m" );
+			ctx.uraIndicators[0]  = MakeInstance( Id( RiichiMahjongTile::MAN_1 ) );
+			ctx.uraIndicatorCount = 1;
+
+			const ScoreResult without = ScoreClosed( "234567m234567p11s", ctx );
+			Assert::AreEqual( 0, static_cast<int>( without.doraHan ), L"no riichi, no ura" );
+
+			ctx.riichi = true;
+			const ScoreResult with = ScoreClosed( "234567m234567p11s", ctx );
+			Assert::AreEqual( 1, static_cast<int>( with.doraHan ) );
+		}
+
+		TEST_METHOD( SanmaNukidoraCountsAsDora )
+		{
+			WinContext ctx = BaseContext( false, "2m" );
+			ctx.rules     = MahjongSoul3P();
+			ctx.nukiCount = 2;
+
+			const ScoreResult r = ScoreClosed( "234567m234567p11s", ctx );
+			Assert::AreEqual( 2, static_cast<int>( r.doraHan ), L"each pulled North is a dora" );
+		}
+	};
+
+	TEST_CLASS( ScoringThroughTheEngine )
+	{
+	public:
+		TEST_METHOD( AHandWithNoYakuCannotBeDeclared )
+		{
+			Engine engine( MahjongSoul4P(), 700 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+
+			// An open hand of runs with a terminal pair: complete, but nothing
+			// to claim.
+			SetHand( s.players[0], "678s11m" );
+			s.players[0].melds[0].type = MeldType::CHI;
+			s.players[0].melds[0].base = Id( RiichiMahjongTile::MAN_2 );
+			s.players[0].melds[1].type = MeldType::CHI;
+			s.players[0].melds[1].base = Id( RiichiMahjongTile::PIN_5 );
+			s.players[0].melds[2].type = MeldType::CHI;
+			s.players[0].melds[2].base = Id( RiichiMahjongTile::SOU_3 );
+			s.players[0].meldCount = 3;
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::SOU_8 ) );
+
+			ActionList legal;
+			LegalActions( s, 0, legal );
+
+			Assert::IsFalse( legal.ContainsType( ActionType::TSUMO ),
+				L"a complete shape with no yaku is not a declarable win" );
+			Assert::IsTrue( engine.Step( Action::Tsumo( 0 ) ) == StepResult::ILLEGAL );
+		}
+
+		TEST_METHOD( AClosedTsumoAlwaysHasAYaku )
+		{
+			Engine engine( MahjongSoul4P(), 701 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+			SetHand( s.players[0], WINNING_14 );
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::PIN_1 ) );
+
+			ActionList legal;
+			LegalActions( s, 0, legal );
+			Assert::IsTrue( legal.ContainsType( ActionType::TSUMO ), L"menzen tsumo is itself a yaku" );
+		}
+
+		TEST_METHOD( TheContextIsReadOffTheLiveState )
+		{
+			Engine engine( MahjongSoul4P(), 702 );
+			engine.StartHand( 0 );
+
+			GameState &s = engine.State();
+			SetHand( s.players[0], WINNING_14 );
+			s.players[0].drawn = MakeInstance( Id( RiichiMahjongTile::PIN_1 ) );
+			s.players[0].riichiDeclared = true;
+			s.honba = 3;
+
+			engine.Step( Action::Tsumo( 0 ) );
+
+			const WinContext ctx = MakeWinContext( s, 0 );
+
+			Assert::IsTrue( ctx.byTsumo );
+			Assert::IsTrue( ctx.riichi );
+			Assert::IsTrue( ctx.isDealer, L"seat 0 dealt the hand" );
+			Assert::AreEqual( 0, static_cast<int>( ctx.seatWind ) );
+			Assert::AreEqual( 3, static_cast<int>( ctx.honba ) );
+			Assert::AreEqual( 1, static_cast<int>( ctx.doraIndicatorCount ) );
+
+			const ScoreResult r = ScoreHand( s.players[0].hand.Counts(), s.players[0].melds,
+				s.players[0].meldCount, ctx );
+
+			Assert::IsTrue( r.valid );
+			Assert::IsTrue( Holds( r, Yaku::RIICHI ) );
+			Assert::IsTrue( Holds( r, Yaku::MENZEN_TSUMO ) );
+			Assert::IsTrue( Holds( r, Yaku::ITTSUU ) );
+		}
+	};
 }

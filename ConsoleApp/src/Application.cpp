@@ -163,6 +163,45 @@ namespace
 		if ( checksum == INT32_MIN ) std::cout << "";
 	}
 
+	void ShowScore( const char *hand, const char *winningTile, const bool tsumo )
+	{
+		Counts34 counts{};
+		AkaMask  aka = AKA_NONE;
+		if ( !CountsFromTenhouString( hand, counts, aka ) ) return;
+
+		WinContext ctx;
+		ctx.rules       = MahjongSoul4P();
+		ctx.byTsumo     = tsumo;
+		ctx.winningTile = MakeInstance( TileFromTenhouString( winningTile ) );
+		ctx.seatWind    = 1; // south seat
+		ctx.roundWind   = 0; // east round
+
+		const ScoreResult r = ScoreHand( counts, nullptr, 0, ctx );
+
+		std::cout << hand << "  " << ( tsumo ? "tsumo" : "ron" ) << " on " << winningTile << "\n";
+
+		if ( !r.valid )
+		{
+			std::cout << "    no yaku, so not a win\n\n";
+			return;
+		}
+
+		std::cout << "    yaku    :";
+		for ( uint8_t bit = 0; bit < static_cast<uint8_t>( Yaku::COUNT ); ++bit )
+		{
+			if ( ( r.yaku & ( 1ULL << bit ) ) != 0 ) std::cout << " " << YakuName( static_cast<Yaku>( bit ) );
+		}
+		std::cout << "\n";
+
+		std::cout << "    han/fu  : " << static_cast<int>( r.han ) << " han " << static_cast<int>( r.fu ) << " fu";
+		if ( r.yakumanCount > 0 ) std::cout << "  (yakuman x" << static_cast<int>( r.yakumanCount ) << ")";
+		std::cout << "\n";
+
+		std::cout << "    points  : " << r.points;
+		if ( tsumo ) std::cout << "  (" << r.fromEachOther << " each, " << r.fromDealer << " from the dealer)";
+		std::cout << "\n\n";
+	}
+
 	void RunHand( const char *label, const Rules &rules, const uint64_t seed )
 	{
 		Engine engine( rules, seed );
@@ -252,6 +291,10 @@ int main()
 	ShowUkeire( "123456789m1123p" );
 	ShowUkeire( "13m456789m11123p" );
 	ShowUkeire( "147m258p369s1234z" );
+
+	ShowScore( "234567m234567p11s", "2m", false );
+	ShowScore( "123456789m11123p", "1p", true );
+	ShowScore( "119m19p19s1234567z", "1m", false );
 
 	BenchmarkShanten();
 

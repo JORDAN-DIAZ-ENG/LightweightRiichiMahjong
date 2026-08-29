@@ -1,5 +1,6 @@
 #include "LegalActions.h"
 
+#include "Score.h"
 #include "Shanten.h"
 #include "WinCheck.h"
 
@@ -83,10 +84,16 @@ namespace LRMahjong::Model
 			const Counts34 &counts = p.hand.Counts();
 
 			// ---- winning ----------------------------------------------
-			// Shape only; whether a yaku is present is M4's question.
+			// A complete shape is not enough: a hand with no yaku cannot be
+			// declared. The scorer is only consulted once the shape is already
+			// known to be complete, which is rare.
 			if ( IsWinningHand( counts, p.meldCount ) )
 			{
-				out.Add( Action::Tsumo( seat ) );
+				WinContext ctx = MakeWinContext( state, seat );
+				ctx.byTsumo     = true;
+				ctx.winningTile = p.drawn;
+
+				if ( HasYaku( counts, p.melds, p.meldCount, ctx ) ) out.Add( Action::Tsumo( seat ) );
 			}
 
 			// ---- abortive draw ----------------------------------------
@@ -189,9 +196,16 @@ namespace LRMahjong::Model
 			if ( withWinning[called] < 4 )
 			{
 				++withWinning[called];
+
 				if ( IsWinningHand( withWinning, p.meldCount ) && !IsFuriten( state, seat ) )
 				{
-					out.Add( Action::Ron( seat ) );
+					WinContext ctx = MakeWinContext( state, seat );
+					ctx.byTsumo     = false;
+					ctx.winningTile = state.lastDiscard;
+					ctx.chankan     = state.awaitingChankan;
+					ctx.houtei      = !state.awaitingChankan && state.LiveWallEmpty();
+
+					if ( HasYaku( withWinning, p.melds, p.meldCount, ctx ) ) out.Add( Action::Ron( seat ) );
 				}
 			}
 

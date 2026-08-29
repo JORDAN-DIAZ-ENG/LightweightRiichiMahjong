@@ -23,6 +23,8 @@
     <ClInclude Include="src\LRMahjong\Model\Action.h" />
     <ClInclude Include="src\LRMahjong\Model\LegalActions.h" />
     <ClInclude Include="src\LRMahjong\Model\Shanten.h" />
+    <ClInclude Include="src\LRMahjong\Model\HandParse.h" />
+    <ClInclude Include="src\LRMahjong\Model\Score.h" />
     <ClInclude Include="src\LRMahjong\Model\WinCheck.h" />
     <ClInclude Include="src\LRMahjong\Model\Rules.h" />
     <ClInclude Include="src\LRMahjong\Model\Observation.h" />
@@ -35,6 +37,8 @@
     <ClCompile Include="src\LRMahjong\Model\Tile.cpp" />
     <ClCompile Include="src\LRMahjong\Model\LegalActions.cpp" />
     <ClCompile Include="src\LRMahjong\Model\Shanten.cpp" />
+    <ClCompile Include="src\LRMahjong\Model\HandParse.cpp" />
+    <ClCompile Include="src\LRMahjong\Model\Score.cpp" />
     <ClCompile Include="src\LRMahjong\Model\WinCheck.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
