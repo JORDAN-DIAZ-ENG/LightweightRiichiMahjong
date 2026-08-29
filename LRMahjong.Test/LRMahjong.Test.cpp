@@ -3363,4 +3363,483 @@ namespace LRMahjongTest
 			Assert::IsTrue( Holds( r, Yaku::ITTSUU ) );
 		}
 	};
+
+	// =================================================================
+	// M5: observation, belief and determinization.
+	// =================================================================
+
+	namespace
+	{
+		// Plays a hand with recording on, then hands back what one seat saw.
+		Observation ObserveAHand( Engine &engine, const uint8_t viewer, const int turns )
+		{
+			engine.EnableEventLog( true );
+			engine.StartHand( 0 );
+
+			int played = 0;
+			while ( engine.State().phase != Phase::HAND_OVER && played < turns )
+			{
+				const GameState &s = engine.State();
+
+				if ( s.phase == Phase::DISCARD )
+				{
+					engine.Step( Action::Discard( s.currentPlayer, s.players[s.currentPlayer].drawn ) );
+					++played;
+				}
+				else
+				{
+					PassEveryone( engine );
+				}
+			}
+
+			return engine.ViewFor( viewer );
+		}
+
+		int TotalTilesIn( const GameState &s )
+		{
+			int held = 0;
+
+			for ( uint8_t seat = 0; seat < s.PlayerCount(); ++seat )
+			{
+				const Player &p = s.players[seat];
+				held += p.hand.TotalTiles();
+				for ( uint8_t i = 0; i < p.meldCount; ++i ) held += p.melds[i].TileCount();
+				for ( uint8_t i = 0; i < p.discardCount; ++i )
+				{
+					if ( ( p.discardFlags[i] & DISCARD_CALLED ) == 0 ) ++held;
+				}
+				held += p.nukiCount;
+			}
+
+			return held;
+		}
+	}
+
+	TEST_CLASS( ObservationLog )
+	{
+	public:
+		TEST_METHOD( RecordingIsOffUntilAskedFor )
+		{
+			Engine engine( MahjongSoul4P(), 1000 );
+			engine.StartHand( 0 );
+
+			Assert::AreEqual( 0, static_cast<int>( engine.EventLog().eventCount ),
+				L"a rollout should not pay for a log it never reads" );
+		}
+
+		TEST_METHOD( APlayedHandProducesEvents )
+		{
+			Engine engine( MahjongSoul4P(), 1001 );
+			const Observation obs = ObserveAHand( engine, 0, 12 );
+
+			Assert::IsTrue( obs.eventCount > 12, L"draws and discards both land in the log" );
+			Assert::AreEqual( 0, static_cast<int>( obs.viewer ) );
+			// The opening hand is the deal alone. The dealer's fourteenth tile
+			// arrives as a draw event like any other, so replaying the log is
+			// what puts it back.
+			Assert::AreEqual( 13, static_cast<int>( TotalOf( obs.startingHand ) ) );
+
+			bool sawDraw = false;
+			bool sawDiscard = false;
+			bool sawDoraFlip = false;
+
+			for ( uint16_t i = 0; i < obs.eventCount; ++i )
+			{
+				if ( obs.events[i].type == EventType::DRAW )      sawDraw = true;
+				if ( obs.events[i].type == EventType::DISCARD )   sawDiscard = true;
+				if ( obs.events[i].type == EventType::DORA_FLIP ) sawDoraFlip = true;
+			}
+
+			Assert::IsTrue( sawDraw && sawDiscard && sawDoraFlip );
+		}
+
+		TEST_METHOD( OtherSeatsDrawsAreRedacted )
+		{
+			Engine engine( MahjongSoul4P(), 1002 );
+			const Observation obs = ObserveAHand( engine, 0, 12 );
+
+			for ( uint16_t i = 0; i < obs.eventCount; ++i )
+			{
+				const Event &e = obs.events[i];
+				if ( e.type != EventType::DRAW ) continue;
+
+				if ( e.actor == 0 )
+				{
+					Assert::IsTrue( IsValidInstance( e.tile ), L"the viewer sees what it draws" );
+				}
+				else
+				{
+					Assert::IsFalse( IsValidInstance( e.tile ), L"and not what anyone else draws" );
+					Assert::IsTrue( e.tileBelief.possible != 0, L"but knows a tile was taken" );
+				}
+			}
+		}
+
+		TEST_METHOD( DiscardsStayVisibleToEveryone )
+		{
+			Engine engine( MahjongSoul4P(), 1003 );
+			const Observation obs = ObserveAHand( engine, 2, 12 );
+
+			for ( uint16_t i = 0; i < obs.eventCount; ++i )
+			{
+				const Event &e = obs.events[i];
+				if ( e.type != EventType::DISCARD ) continue;
+
+				Assert::IsTrue( IsValidInstance( e.tile ), L"a discard is public whoever made it" );
+			}
+		}
+	};
+
+	TEST_CLASS( BeliefBuilding )
+	{
+	public:
+		TEST_METHOD( TheViewerKnowsItsOwnHandExactly )
+		{
+			Engine engine( MahjongSoul4P(), 1100 );
+			const Observation obs = ObserveAHand( engine, 1, 8 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			const Counts34 &believed = belief.publicState.players[1].hand.Counts();
+			const Counts34 &actual   = engine.State().players[1].hand.Counts();
+
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				Assert::AreEqual( static_cast<int>( actual[t] ), static_cast<int>( believed[t] ),
+					L"the viewer's own hand is not a guess" );
+			}
+		}
+
+		TEST_METHOD( SeenAndUnseenAccountForEveryTile )
+		{
+			Engine engine( MahjongSoul4P(), 1101 );
+			const Observation obs = ObserveAHand( engine, 0, 16 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			// Everything the viewer can see, plus everything it cannot, is the
+			// whole tile set.
+			const Counts34 visible = belief.publicState.VisibleTo( 0 );
+
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				Assert::AreEqual( static_cast<int>( belief.rules.CopiesOf( t ) ),
+					static_cast<int>( visible[t] + belief.unseen[t] ),
+					L"a tile is either accounted for or in the pool" );
+			}
+		}
+
+		TEST_METHOD( OpponentHandSizesAreKnownEvenWhenContentsAreNot )
+		{
+			Engine engine( MahjongSoul4P(), 1102 );
+			const Observation obs = ObserveAHand( engine, 0, 9 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			for ( uint8_t seat = 1; seat < 4; ++seat )
+			{
+				const uint8_t size = belief.hands[seat].size;
+				Assert::IsTrue( size == 13 || size == 14, L"thirteen, or fourteen while holding a draw" );
+
+				// And nothing at all is known about their contents.
+				Assert::AreEqual( 0, TotalOf( belief.hands[seat].known ) );
+			}
+		}
+
+		TEST_METHOD( DiscardedTilesLeaveThePool )
+		{
+			Engine engine( MahjongSoul4P(), 1103 );
+			const Observation obs = ObserveAHand( engine, 0, 20 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			for ( uint8_t seat = 0; seat < 4; ++seat )
+			{
+				const Player &p = belief.publicState.players[seat];
+
+				for ( uint8_t i = 0; i < p.discardCount; ++i )
+				{
+					const TileId t = InstanceTile( p.discards[i] );
+					Assert::IsTrue( belief.unseen[t] < belief.rules.CopiesOf( t ),
+						L"a tile on the table is not still in the pool" );
+				}
+			}
+		}
+
+		TEST_METHOD( RebuildingMatchesApplyingIncrementally )
+		{
+			Engine engine( MahjongSoul4P(), 1104 );
+			const Observation obs = ObserveAHand( engine, 0, 14 );
+
+			Belief rebuilt;
+			rebuilt.BuildFrom( obs );
+
+			// The assistant path: reset once, then feed events as they arrive.
+			Belief incremental;
+			incremental.Reset( obs );
+			for ( uint16_t i = 0; i < obs.eventCount; ++i ) incremental.Apply( obs.events[i] );
+
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				Assert::AreEqual( static_cast<int>( rebuilt.unseen[t] ), static_cast<int>( incremental.unseen[t] ),
+					L"one implementation, whichever way it is driven" );
+			}
+
+			for ( uint8_t seat = 0; seat < 4; ++seat )
+			{
+				Assert::AreEqual( static_cast<int>( rebuilt.hands[seat].size ),
+					static_cast<int>( incremental.hands[seat].size ) );
+			}
+		}
+	};
+
+	TEST_CLASS( Determinization )
+	{
+	public:
+		TEST_METHOD( ASampledWorldAgreesWithEverythingSeen )
+		{
+			Engine engine( MahjongSoul4P(), 1200 );
+			const Observation obs = ObserveAHand( engine, 0, 16 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			Rng rng( 4242 );
+			GameState world;
+			Assert::IsTrue( Determinize( belief, rng, world ) );
+
+			const GameState &real = engine.State();
+
+			// The viewer's own hand.
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				Assert::AreEqual( static_cast<int>( real.players[0].hand.Counts()[t] ),
+					static_cast<int>( world.players[0].hand.Counts()[t] ),
+					L"the sampled world must not rewrite what the viewer holds" );
+			}
+
+			// Every pond.
+			for ( uint8_t seat = 0; seat < 4; ++seat )
+			{
+				Assert::AreEqual( static_cast<int>( real.players[seat].discardCount ),
+					static_cast<int>( world.players[seat].discardCount ) );
+
+				for ( uint8_t i = 0; i < real.players[seat].discardCount; ++i )
+				{
+					Assert::AreEqual( static_cast<int>( InstanceTile( real.players[seat].discards[i] ) ),
+						static_cast<int>( InstanceTile( world.players[seat].discards[i] ) ) );
+				}
+			}
+
+			// And the dora indicator.
+			Assert::AreEqual( static_cast<int>( InstanceTile( real.DoraIndicator( 0 ) ) ),
+				static_cast<int>( InstanceTile( world.DoraIndicator( 0 ) ) ) );
+		}
+
+		TEST_METHOD( OpponentsGetTheRightNumberOfTiles )
+		{
+			Engine engine( MahjongSoul4P(), 1201 );
+			const Observation obs = ObserveAHand( engine, 0, 11 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			Rng rng( 55 );
+			GameState world;
+			Assert::IsTrue( Determinize( belief, rng, world ) );
+
+			for ( uint8_t seat = 1; seat < 4; ++seat )
+			{
+				Assert::AreEqual( static_cast<int>( belief.hands[seat].size ),
+					static_cast<int>( world.players[seat].hand.TotalTiles() ) );
+			}
+		}
+
+		TEST_METHOD( SampledHandsOnlyHoldUnseenTiles )
+		{
+			Engine engine( MahjongSoul4P(), 1202 );
+			const Observation obs = ObserveAHand( engine, 0, 18 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			Rng rng( 7 );
+
+			for ( int trial = 0; trial < 20; ++trial )
+			{
+				GameState world;
+				Assert::IsTrue( Determinize( belief, rng, world ) );
+
+				Counts34 dealt{};
+				for ( uint8_t seat = 1; seat < 4; ++seat )
+				{
+					const Counts34 &hand = world.players[seat].hand.Counts();
+					for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+					{
+						dealt[t] = static_cast<uint8_t>( dealt[t] + hand[t] );
+					}
+				}
+
+				for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+				{
+					Assert::IsTrue( dealt[t] <= belief.unseen[t],
+						L"an opponent cannot hold a tile the viewer has already seen" );
+				}
+			}
+		}
+
+		TEST_METHOD( EveryTileIsStillAccountedFor )
+		{
+			Engine engine( MahjongSoul4P(), 1203 );
+			const Observation obs = ObserveAHand( engine, 0, 15 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			Rng rng( 909 );
+			GameState world;
+			Assert::IsTrue( Determinize( belief, rng, world ) );
+
+			Assert::AreEqual( 136, TotalTilesIn( world ) + world.LiveWallRemaining() + DEAD_WALL_TILES );
+		}
+
+		TEST_METHOD( DifferentSamplesDisagreeAboutHiddenTiles )
+		{
+			Engine engine( MahjongSoul4P(), 1204 );
+			const Observation obs = ObserveAHand( engine, 0, 10 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			Rng rng( 31337 );
+
+			GameState first;
+			GameState second;
+			Assert::IsTrue( Determinize( belief, rng, first ) );
+			Assert::IsTrue( Determinize( belief, rng, second ) );
+
+			bool differs = false;
+			for ( TileId t = 0; t < TILE_KIND_COUNT && !differs; ++t )
+			{
+				if ( first.players[1].hand.Counts()[t] != second.players[1].hand.Counts()[t] ) differs = true;
+			}
+
+			Assert::IsTrue( differs, L"sampling should explore the space, not return one world" );
+		}
+
+		TEST_METHOD( SanmaDeterminizesToo )
+		{
+			Engine engine( MahjongSoul3P(), 1205 );
+			const Observation obs = ObserveAHand( engine, 0, 12 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			Rng rng( 108 );
+			GameState world;
+			Assert::IsTrue( Determinize( belief, rng, world ) );
+
+			Assert::AreEqual( 3, static_cast<int>( world.PlayerCount() ) );
+
+			// The manzu that do not exist must not appear in a sampled hand.
+			for ( uint8_t seat = 1; seat < 3; ++seat )
+			{
+				for ( TileId t = Id( RiichiMahjongTile::MAN_2 ); t <= Id( RiichiMahjongTile::MAN_8 ); ++t )
+				{
+					Assert::AreEqual( 0, static_cast<int>( world.players[seat].hand.Count( t ) ) );
+				}
+			}
+		}
+
+		TEST_METHOD( ASampledWorldCanBeRolledOut )
+		{
+			// The whole point: a determinized state has to be something the
+			// engine will actually accept and play on.
+			Engine engine( MahjongSoul4P(), 1206 );
+			const Observation obs = ObserveAHand( engine, 0, 14 );
+
+			Belief belief;
+			belief.BuildFrom( obs );
+
+			Rng rng( 12 );
+			GameState world;
+			Assert::IsTrue( Determinize( belief, rng, world ) );
+
+			Engine rollout( MahjongSoul4P(), 99 );
+			rollout.State() = world;
+
+			ActionList legal;
+			const uint8_t seat = world.currentPlayer;
+			Assert::IsTrue( LegalActions( rollout.State(), seat, legal ) > 0,
+				L"a sampled world must offer somebody something to do" );
+		}
+	};
+
+	TEST_CLASS( Reconciliation )
+	{
+	public:
+		TEST_METHOD( ACleanObservationIsConsistent )
+		{
+			Engine engine( MahjongSoul4P(), 1300 );
+			Observation obs = ObserveAHand( engine, 0, 14 );
+
+			Assert::IsTrue( Reconcile( obs, RepairPolicy::STRICT ) == ReconcileResult::CONSISTENT );
+		}
+
+		TEST_METHOD( AFifthCopyIsImpossible )
+		{
+			Engine engine( MahjongSoul4P(), 1301 );
+			Observation obs = ObserveAHand( engine, 0, 6 );
+
+			// Claim four more 1m discards on top of whatever is already there.
+			for ( int i = 0; i < 5; ++i )
+			{
+				obs.Append( Event::Discard( 1, MakeInstance( Id( RiichiMahjongTile::MAN_1 ) ), Conf::CERTAIN ) );
+			}
+
+			Assert::IsTrue( Reconcile( obs, RepairPolicy::STRICT ) == ReconcileResult::IMPOSSIBLE );
+		}
+
+		TEST_METHOD( LowConfidenceReadingsAreDroppedToRecover )
+		{
+			Engine engine( MahjongSoul4P(), 1302 );
+			Observation obs = ObserveAHand( engine, 0, 6 );
+
+			// The same impossible claim, but this time the frontend was unsure.
+            for ( int i = 0; i < 5; ++i )
+			{
+				obs.Append( Event::Discard( 1, MakeInstance( Id( RiichiMahjongTile::MAN_1 ) ), Conf::LOW ) );
+			}
+
+			Assert::IsTrue( Reconcile( obs, RepairPolicy::STRICT ) == ReconcileResult::IMPOSSIBLE,
+				L"strict never drops anything" );
+
+			Assert::IsTrue( Reconcile( obs, RepairPolicy::DROP_LEAST_CONFIDENT ) == ReconcileResult::REPAIRED );
+
+			// And what survived is now usable.
+			Belief belief;
+			belief.BuildFrom( obs );
+			Assert::IsTrue( belief.consistent );
+		}
+
+		TEST_METHOD( CertainReadingsAreNeverDropped )
+		{
+			Observation obs;
+			obs.rules  = MahjongSoul4P();
+			obs.viewer = 0;
+
+			// Five certain 1m discards cannot be repaired by dropping doubt,
+			// because there is none to drop.
+			for ( int i = 0; i < 5; ++i )
+			{
+				obs.Append( Event::Discard( 1, MakeInstance( Id( RiichiMahjongTile::MAN_1 ) ), Conf::CERTAIN ) );
+			}
+
+			Assert::IsTrue( Reconcile( obs, RepairPolicy::DROP_LEAST_CONFIDENT ) == ReconcileResult::IMPOSSIBLE );
+		}
+	};
 }

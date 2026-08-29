@@ -72,12 +72,79 @@ namespace LRMahjong
 		}
 	}
 
+	void Engine::EnableEventLog( const bool enabled )
+	{
+		_logging = enabled;
+		if ( !enabled ) _log.Clear();
+	}
+
+	void Engine::Record( const Event &e )
+	{
+		if ( _logging ) _log.Append( e );
+	}
+
+	// Flipping an indicator is public, so it is both a state change and an
+	// event; keeping them together stops the two drifting apart.
+	void Engine::RevealDora()
+	{
+		const uint8_t slot = _state.doraIndicators;
+		_state.RevealDoraIndicator();
+
+		if ( slot < _state.doraIndicators )
+		{
+			Record( Event::DoraFlip( _state.wall[_state.DeadWallStart() + slot] ) );
+		}
+	}
+
+	// The log is kept from the table's point of view, holding every tile.
+	// ViewFor is what narrows it to a seat.
+	Observation Engine::ViewFor( const uint8_t viewer ) const
+	{
+		Observation obs;
+
+		obs.rules        = _rules;
+		obs.viewer       = viewer;
+		obs.dealer       = _state.dealer;
+		obs.roundWind    = _state.roundWind;
+		obs.honba        = _state.honba;
+		obs.riichiSticks = 0;
+
+		if ( viewer < _rules.numPlayers )
+		{
+			obs.startingHand = _startingHands[viewer];
+			obs.startingAka  = _startingAka[viewer];
+		}
+
+		for ( uint16_t i = 0; i < _log.eventCount; ++i )
+		{
+			Event e = _log.events[i];
+
+			// Somebody else drawing is visible; what they drew is not.
+			if ( e.type == EventType::DRAW && e.actor != viewer )
+			{
+				e.tile       = INVALID_INSTANCE;
+				e.tileBelief = TileBelief::Any();
+			}
+
+			obs.Append( e );
+		}
+
+		return obs;
+	}
+
 	void Engine::StartHand( const uint8_t dealer )
 	{
 		_state.Reset( _rules, dealer );
+		_log.Clear();
 		BuildWall();
 		DealHands();
-		_state.RevealDoraIndicator();
+
+		for ( uint8_t seat = 0; seat < _rules.numPlayers; ++seat )
+		{
+			_startingHands[seat] = _state.players[seat].hand.Counts();
+			_startingAka[seat]   = _state.players[seat].hand.Aka();
+		}
+		RevealDora();
 
 		_state.currentPlayer = dealer;
 		GiveDrawTo( dealer, false );
@@ -93,6 +160,8 @@ namespace LRMahjong
 		p.hand.Add( InstanceTile( tile ), InstanceIsAka( tile ) );
 		p.drawn           = tile;
 		p.awaitingDiscard = true;
+
+		Record( Event::Draw( seat, tile ) );
 
 		// Temporary furiten lifts the moment you draw again.
 		p.furitenTemporary = false;
@@ -183,6 +252,9 @@ namespace LRMahjong
 		p.drawn           = INVALID_INSTANCE;
 		p.awaitingDiscard = false;
 
+		if ( action.type == ActionType::RIICHI ) Record( Event::Riichi( action.actor ) );
+		Record( Event::Discard( action.actor, action.tile ) );
+
 		_state.lastDiscard       = action.tile;
 		_state.lastDiscarder     = action.actor;
 		_state.forbiddenDiscards = 0; // the kuikae restriction lasts one discard
@@ -191,7 +263,7 @@ namespace LRMahjong
 		// kan already flipped its own.
 		if ( _state.pendingDoraFlip )
 		{
-			_state.RevealDoraIndicator();
+			RevealDora();
 			_state.pendingDoraFlip = false;
 		}
 
@@ -216,8 +288,10 @@ namespace LRMahjong
 		meld.from = CalledFrom::SELF;
 		meld.aka  = takesAka ? akaBit : AKA_NONE;
 
+		Record( Event::Ankan( action.actor, action.base, meld.aka ) );
+
 		// A concealed kan turns its indicator immediately.
-		_state.RevealDoraIndicator();
+		RevealDora();
 
 		if ( !GiveDrawTo( action.actor, true ) ) return StepResult::ILLEGAL;
 
@@ -255,6 +329,9 @@ namespace LRMahjong
 		pon->type = MeldType::SHOUMINKAN;
 		if ( takesAka ) pon->aka = static_cast<AkaMask>( pon->aka | akaBit );
 
+		Record( Event::Call( action.actor, MeldType::SHOUMINKAN, action.base,
+			MakeInstance( action.base, takesAka ), action.actor, pon->aka ) );
+
 		// The added tile is open to being robbed before the replacement draw
 		// happens, so the window opens here and the draw waits for it to close.
 		_state.lastDiscard      = MakeInstance( action.base, takesAka );
@@ -271,6 +348,8 @@ namespace LRMahjong
 		const TileId north = Id( RiichiMahjongTile::NORTH );
 		p.hand.Remove( north );
 		++p.nukiCount;
+
+		Record( Event::Kita( action.actor ) );
 
 		// Whether a pulled North can be ronned is one of the unverified
 		// Mahjong Soul rules; for now it simply leaves play.
@@ -468,6 +547,9 @@ namespace LRMahjong
 		meld.aka    = static_cast<AkaMask>( action.meldAka |
 			( InstanceIsAka( _state.lastDiscard ) ? AkaBitFor( called ) : AKA_NONE ) );
 
+		Record( Event::Call( action.actor, MeldType::CHI, base, _state.lastDiscard,
+			_state.lastDiscarder, meld.aka ) );
+
 		CompleteCall( action.actor, MeldType::CHI, base );
 		return StepResult::OK;
 	}
@@ -491,6 +573,9 @@ namespace LRMahjong
 			( action.actor + _rules.numPlayers - _state.lastDiscarder ) % _rules.numPlayers );
 		meld.aka    = static_cast<AkaMask>( ( takesAka ? bit : AKA_NONE ) |
 			( InstanceIsAka( _state.lastDiscard ) ? bit : AKA_NONE ) );
+
+		Record( Event::Call( action.actor, MeldType::PON, called, _state.lastDiscard,
+			_state.lastDiscarder, meld.aka ) );
 
 		CompleteCall( action.actor, MeldType::PON, called );
 		return StepResult::OK;
@@ -517,6 +602,9 @@ namespace LRMahjong
 			( action.actor + _rules.numPlayers - _state.lastDiscarder ) % _rules.numPlayers );
 		meld.aka    = static_cast<AkaMask>( ( takesAka ? bit : AKA_NONE ) |
 			( InstanceIsAka( _state.lastDiscard ) ? bit : AKA_NONE ) );
+
+		Record( Event::Call( action.actor, MeldType::MINKAN, called, _state.lastDiscard,
+			_state.lastDiscarder, meld.aka ) );
 
 		CompleteCall( action.actor, MeldType::MINKAN, called );
 
