@@ -1,5 +1,6 @@
 #include "LegalActions.h"
 
+#include "Shanten.h"
 #include "WinCheck.h"
 
 namespace LRMahjong::Model
@@ -120,7 +121,12 @@ namespace LRMahjong::Model
 				!p.riichiDeclared &&
 				p.IsMenzen() &&
 				p.points >= 1000 &&
-				state.LiveWallRemaining() >= 4;
+				state.LiveWallRemaining() >= 4 &&
+				// One shanten call settles whether any discard could leave the
+				// hand tenpai. Without this the loop below runs a tenpai test
+				// per candidate discard even for hands nowhere near ready,
+				// which dominated the cost of action generation.
+				Shanten( counts, p.meldCount ) <= 0;
 
 			if ( canDeclare )
 			{
@@ -130,7 +136,7 @@ namespace LRMahjong::Model
 					if ( ( state.forbiddenDiscards & Bit( t ) ) != 0 && !state.rules.kuikae ) continue;
 
 					// Declaring requires the hand to be tenpai once the tile is gone.
-					if ( !IsTenpai( WithoutTile( counts, t ), p.meldCount ) ) continue;
+					if ( Shanten( WithoutTile( counts, t ), p.meldCount ) != 0 ) continue;
 
 					AddDiscardVariants( out, seat, p.hand, t, true );
 				}
@@ -345,6 +351,11 @@ namespace LRMahjong::Model
 		{
 			return false;
 		}
+
+		// Only a tenpai hand has a wait to be furiten against, and settling that
+		// with one shanten call is far cheaper than enumerating the waits of a
+		// hand that has none.
+		if ( Shanten( resting, p.meldCount ) != 0 ) return false;
 
 		const uint64_t waits = WaitingTiles( resting, p.meldCount );
 		if ( waits == 0 ) return false;

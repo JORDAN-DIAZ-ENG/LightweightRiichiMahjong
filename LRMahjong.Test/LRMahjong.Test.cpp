@@ -2413,4 +2413,446 @@ namespace LRMahjongTest
 			Assert::IsTrue( LegalActions( s, 0, legal ) > 0 );
 		}
 	};
+
+	// =================================================================
+	// M3: shanten and ukeire.
+	// =================================================================
+
+	namespace
+	{
+		int8_t ShantenOf( const char *tenhou, const uint8_t meldCount = 0 )
+		{
+			return Shanten( CountsOf( tenhou ), meldCount );
+		}
+
+		// Deals a random legal hand of the given size from a fresh 136 tile
+		// pool, so no kind ever appears five times.
+		Counts34 RandomHand( Rng &rng, const int tiles, const bool sanmaOnly = false )
+		{
+			Counts34 pool{};
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				pool[t] = ( sanmaOnly && !IsSanmaTile( t ) ) ? static_cast<uint8_t>( 0 ) : static_cast<uint8_t>( 4 );
+			}
+
+			Counts34 hand{};
+			for ( int drawn = 0; drawn < tiles; ++drawn )
+			{
+				int remaining = 0;
+				for ( TileId t = 0; t < TILE_KIND_COUNT; ++t ) remaining += pool[t];
+				if ( remaining == 0 ) break;
+
+				int pick = static_cast<int>( rng.Below( static_cast<uint32_t>( remaining ) ) );
+				for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+				{
+					if ( pick < pool[t] )
+					{
+						--pool[t];
+						++hand[t];
+						break;
+					}
+					pick -= pool[t];
+				}
+			}
+
+			return hand;
+		}
+
+		std::wstring ToWString( const std::string &text )
+		{
+			return std::wstring( text.begin(), text.end() );
+		}
+
+		int TotalOf( const Counts34 &counts )
+		{
+			int total = 0;
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t ) total += counts[t];
+			return total;
+		}
+	}
+
+	TEST_CLASS( ShantenBasics )
+	{
+	public:
+		TEST_METHOD( CompleteHandsAreMinusOne )
+		{
+			Assert::AreEqual( -1, static_cast<int>( ShantenOf( WINNING_14 ) ) );
+			Assert::AreEqual( -1, static_cast<int>( ShantenOf( "111222333444m55p" ) ) );
+			Assert::AreEqual( -1, static_cast<int>( ShantenOf( "1133557799m1133p" ) ), L"seven pairs" );
+			Assert::AreEqual( -1, static_cast<int>( ShantenOf( "119m19p19s1234567z" ) ), L"thirteen orphans" );
+		}
+
+		TEST_METHOD( TenpaiHandsAreZero )
+		{
+			Assert::AreEqual( 0, static_cast<int>( ShantenOf( TENPAI_13 ) ) );
+			Assert::AreEqual( 0, static_cast<int>( ShantenOf( "123456789m123p5s" ) ), L"tanki" );
+			Assert::AreEqual( 0, static_cast<int>( ShantenOf( "13m456789m11123p" ) ), L"kanchan" );
+			Assert::AreEqual( 0, static_cast<int>( ShantenOf( "119m19p19s123456z" ) ), L"orphans, one short" );
+			Assert::AreEqual( 0, static_cast<int>( ShantenOf( "1133557799m113p" ) ), L"six pairs" );
+		}
+
+		TEST_METHOD( AStructurelessHandIsCappedBySevenPairs )
+		{
+			// Thirteen isolated tiles: no block can form without trading
+			// something in, so the standard reading is as bad as it gets.
+			const Counts34 scattered = CountsOf( "147m258p369s1234z" );
+			Assert::AreEqual( 8, static_cast<int>( StandardShanten( scattered, 0 ) ) );
+
+			// Seven pairs is the better reading of a hand made only of singles:
+			// keep seven of them and pair each one up.
+			Assert::AreEqual( 6, static_cast<int>( Shanten( scattered, 0 ) ) );
+		}
+
+		TEST_METHOD( MeldsCountTowardsTheFourSets )
+		{
+			// Two melds already down, so the concealed eight tiles need two more
+			// sets and the pair.
+			Assert::AreEqual( -1, static_cast<int>( ShantenOf( "123456m11p", 2 ) ) );
+			Assert::AreEqual( 0,  static_cast<int>( ShantenOf( "12456m11p", 2 ) ) );
+			Assert::AreEqual( -1, static_cast<int>( ShantenOf( "11p", 4 ) ) );
+		}
+
+		TEST_METHOD( SpecialFormsBeatTheStandardReadingWhenTheyApply )
+		{
+			// Six pairs and a float: tenpai as seven pairs, but a long way off
+			// under the four-sets-and-a-pair reading.
+			const Counts34 pairs = CountsOf( "1133557799m113p" );
+
+			Assert::AreEqual( 0, static_cast<int>( SevenPairsShanten( pairs ) ) );
+			Assert::AreEqual( 0, static_cast<int>( Shanten( pairs, 0 ) ), L"the better form wins" );
+			Assert::IsTrue( StandardShanten( pairs, 0 ) > 0, L"as four sets and a pair it is not close" );
+
+			// Thirteen orphans likewise.
+			const Counts34 orphans = CountsOf( "119m19p19s123456z" );
+			Assert::AreEqual( 0, static_cast<int>( Shanten( orphans, 0 ) ) );
+			Assert::IsTrue( StandardShanten( orphans, 0 ) > 0 );
+		}
+
+		TEST_METHOD( SevenPairsCountsDistinctKinds )
+		{
+			// Four of a kind supplies one pair towards seven, not two, so the
+			// duplicate has to be traded out.
+			// Five pairs but only six distinct kinds, so a seventh kind has to be
+			// found as well: one exchange for the pair, one for the kind.
+			Assert::AreEqual( 2, static_cast<int>( SevenPairsShanten( CountsOf( "1111335577m113p" ) ) ) );
+			Assert::AreEqual( 0, static_cast<int>( SevenPairsShanten( CountsOf( "1133557799m113p" ) ) ) );
+		}
+
+		TEST_METHOD( ThirteenOrphansCountsKindsAndThePair )
+		{
+			// All thirteen kinds, no pair: the thirteen-sided wait.
+			Assert::AreEqual( 0,  static_cast<int>( ThirteenOrphansShanten( CountsOf( "19m19p19s1234567z" ) ) ) );
+			Assert::AreEqual( -1, static_cast<int>( ThirteenOrphansShanten( CountsOf( "119m19p19s1234567z" ) ) ) );
+
+			// Twelve kinds with a pair is tenpai on the thirteenth.
+			Assert::AreEqual( 0, static_cast<int>( ThirteenOrphansShanten( CountsOf( "119m19p19s123456z" ) ) ) );
+
+			// Twelve kinds and no pair is one away.
+			Assert::AreEqual( 1, static_cast<int>( ThirteenOrphansShanten( CountsOf( "159m19p19s123456z" ) ) ) );
+		}
+	};
+
+	// -----------------------------------------------------------------
+	// The equivalence test. The fast path splits a hand by suit, profiles
+	// each group and recombines; the reference is one flat recursion over
+	// all 34 tiles. They agree only if the grouping and the recombination
+	// are both right, which is where the bugs actually live.
+	// -----------------------------------------------------------------
+	TEST_CLASS( ShantenEquivalence )
+	{
+	public:
+		TEST_METHOD( FastAgreesWithReferenceOnRandomHands )
+		{
+			Rng rng( 20260824 );
+
+			for ( int i = 0; i < 20000; ++i )
+			{
+				const Counts34 hand = RandomHand( rng, 13 );
+
+				const int8_t fast = Shanten( hand, 0 );
+				const int8_t slow = ShantenReference( hand, 0 );
+
+				if ( fast != slow )
+				{
+					Assert::AreEqual( static_cast<int>( slow ), static_cast<int>( fast ),
+						ToWString( CountsToTenhouString( hand, AKA_NONE ) ).c_str() );
+				}
+			}
+		}
+
+		TEST_METHOD( FastAgreesWithReferenceOnMeldedHands )
+		{
+			Rng rng( 777 );
+
+			for ( uint8_t melds = 1; melds <= 4; ++melds )
+			{
+				const int tiles = 13 - 3 * melds;
+
+				for ( int i = 0; i < 4000; ++i )
+				{
+					const Counts34 hand = RandomHand( rng, tiles );
+
+					const int8_t fast = Shanten( hand, melds );
+					const int8_t slow = ShantenReference( hand, melds );
+
+					if ( fast != slow )
+					{
+						Assert::AreEqual( static_cast<int>( slow ), static_cast<int>( fast ),
+							ToWString( CountsToTenhouString( hand, AKA_NONE ) ).c_str() );
+					}
+				}
+			}
+		}
+
+		TEST_METHOD( FastAgreesWithReferenceOnFourteenTileHands )
+		{
+			Rng rng( 31337 );
+
+			for ( int i = 0; i < 10000; ++i )
+			{
+				const Counts34 hand = RandomHand( rng, 14 );
+				Assert::AreEqual( static_cast<int>( ShantenReference( hand, 0 ) ),
+					static_cast<int>( Shanten( hand, 0 ) ) );
+			}
+		}
+
+		TEST_METHOD( FastAgreesWithReferenceOnSanmaHands )
+		{
+			Rng rng( 108 );
+
+			for ( int i = 0; i < 8000; ++i )
+			{
+				const Counts34 hand = RandomHand( rng, 13, true );
+				Assert::AreEqual( static_cast<int>( ShantenReference( hand, 0 ) ),
+					static_cast<int>( Shanten( hand, 0 ) ) );
+			}
+		}
+
+		// Hands near tenpai are where correctness matters most and where a
+		// purely random sample lands least often, so they get their own pass.
+		TEST_METHOD( FastAgreesWithReferenceNearTenpai )
+		{
+			Rng rng( 555 );
+			int nearCount = 0;
+
+			for ( int i = 0; i < 40000 && nearCount < 4000; ++i )
+			{
+				const Counts34 hand = RandomHand( rng, 13 );
+
+				const int8_t slow = ShantenReference( hand, 0 );
+				if ( slow > 2 ) continue;
+
+				++nearCount;
+				Assert::AreEqual( static_cast<int>( slow ), static_cast<int>( Shanten( hand, 0 ) ) );
+			}
+
+			Assert::IsTrue( nearCount > 500, L"the sample should contain plenty of near-tenpai hands" );
+		}
+	};
+
+	// -----------------------------------------------------------------
+	// Cross-checks against the independently written M2 code. These
+	// validate the block formula itself, which the two shanten
+	// implementations share and so cannot check between themselves.
+	// -----------------------------------------------------------------
+	TEST_CLASS( ShantenAgreesWithWinCheck )
+	{
+	public:
+		TEST_METHOD( MinusOneMeansAComplete14TileHand )
+		{
+			Rng rng( 4242 );
+
+			for ( int i = 0; i < 20000; ++i )
+			{
+				const Counts34 hand = RandomHand( rng, 14 );
+
+				const bool byShanten = Shanten( hand, 0 ) == SHANTEN_COMPLETE;
+				const bool byWinCheck = IsWinningHand( hand, 0 );
+
+				Assert::AreEqual( byWinCheck, byShanten, L"shanten -1 must mean a complete hand" );
+			}
+		}
+
+		// The implication only runs one way. Shanten measures shape and ignores
+		// the four-copy limit, so a hand whose only wait is on a tile it
+		// already holds all four of is shanten 0 with an empty wait. Karaten is
+		// a real state, not a disagreement.
+		TEST_METHOD( AnyHandWithAWaitIsShantenZero )
+		{
+			Rng rng( 909 );
+
+			for ( int i = 0; i < 20000; ++i )
+			{
+				const Counts34 hand = RandomHand( rng, 13 );
+
+				if ( WaitingTiles( hand, 0 ) != 0 )
+				{
+					Assert::AreEqual( 0, static_cast<int>( Shanten( hand, 0 ) ),
+						L"a hand with a winning tile must be tenpai" );
+				}
+			}
+		}
+
+		TEST_METHOD( MeldedHandsAgreeToo )
+		{
+			Rng rng( 606 );
+
+			for ( uint8_t melds = 1; melds <= 3; ++melds )
+			{
+				for ( int i = 0; i < 5000; ++i )
+				{
+					const Counts34 hand = RandomHand( rng, 13 - 3 * melds );
+
+					if ( WaitingTiles( hand, melds ) != 0 )
+					{
+						Assert::AreEqual( 0, static_cast<int>( Shanten( hand, melds ) ) );
+					}
+				}
+			}
+		}
+
+		TEST_METHOD( KaratenIsTenpaiByShapeWithNothingToWinOn )
+		{
+			// Three melds down and all four 1m in hand: the shape is a tanki on
+			// 1m, but no fifth copy exists to complete it.
+			const Counts34 hand = CountsOf( "1111m" );
+
+			Assert::AreEqual( 0, static_cast<int>( Shanten( hand, 3 ) ), L"tenpai by shape" );
+			Assert::AreEqual( uint64_t( 0 ), WaitingTiles( hand, 3 ), L"but nothing left to draw" );
+			Assert::IsFalse( IsTenpai( hand, 3 ) );
+		}
+
+		TEST_METHOD( AnyShantenDisagreementIsKaraten )
+		{
+			Rng rng( 313 );
+
+			for ( uint8_t melds = 0; melds <= 3; ++melds )
+			{
+				for ( int i = 0; i < 5000; ++i )
+				{
+					const Counts34 hand = RandomHand( rng, 13 - 3 * melds );
+
+					if ( Shanten( hand, melds ) != 0 ) continue;
+					if ( WaitingTiles( hand, melds ) != 0 ) continue;
+
+					// The only way to be tenpai with no winning tile is for
+					// every wait to need a fifth copy.
+					bool everyWaitExhausted = true;
+					for ( TileId t = 0; t < TILE_KIND_COUNT && everyWaitExhausted; ++t )
+					{
+						if ( hand[t] >= 4 ) continue;
+
+						Counts34 drawn = hand;
+						++drawn[t];
+						if ( IsWinningHand( drawn, melds ) ) everyWaitExhausted = false;
+					}
+
+					Assert::IsTrue( everyWaitExhausted,
+						L"tenpai with no wait must be a hand needing a fifth tile" );
+				}
+			}
+		}
+	};
+
+	TEST_CLASS( UkeireTests )
+	{
+	public:
+		TEST_METHOD( UkeireMatchesTheWaitSetAtTenpai )
+		{
+			// At tenpai the tiles that reduce shanten are exactly the winning
+			// tiles.
+			const Counts34 hand = CountsOf( TENPAI_13 );
+
+			Assert::AreEqual( WaitingTiles( hand, 0 ), Ukeire( hand, 0 ) );
+			Assert::AreEqual( MaskOf( { RiichiMahjongTile::PIN_1, RiichiMahjongTile::PIN_4 } ),
+				Ukeire( hand, 0 ) );
+		}
+
+		TEST_METHOD( EveryUsefulTileActuallyLowersShanten )
+		{
+			Rng rng( 2468 );
+
+			for ( int i = 0; i < 3000; ++i )
+			{
+				const Counts34 hand = RandomHand( rng, 13 );
+
+				const int8_t before = Shanten( hand, 0 );
+				const uint64_t useful = Ukeire( hand, 0 );
+
+				for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+				{
+					if ( hand[t] >= 4 ) continue;
+
+					Counts34 drawn = hand;
+					++drawn[t];
+
+					const bool improves = Shanten( drawn, 0 ) < before;
+					const bool listed   = ( useful & ( 1ULL << t ) ) != 0;
+
+					Assert::AreEqual( improves, listed, L"ukeire must list exactly the improving tiles" );
+				}
+			}
+		}
+
+		TEST_METHOD( ACompleteHandHasNoUkeire )
+		{
+			Assert::AreEqual( uint64_t( 0 ), Ukeire( CountsOf( WINNING_14 ), 0 ) );
+		}
+
+		TEST_METHOD( CopiesAreWeightedByWhatRemainsUnseen )
+		{
+			const Counts34 hand = CountsOf( TENPAI_13 ); // waits on 1p and 4p
+
+			// Nothing seen yet beyond the hand itself: two 1p and four 4p left.
+			Counts34 remaining{};
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				remaining[t] = static_cast<uint8_t>( 4 - hand[t] );
+			}
+
+			const UkeireResult full = UkeireAgainst( hand, 0, remaining );
+			Assert::AreEqual( 0, static_cast<int>( full.shanten ) );
+			Assert::AreEqual( 6, static_cast<int>( full.copies ), L"two 1p plus four 4p" );
+
+			// Once every 4p is accounted for, only the two 1p are left.
+			remaining[Id( RiichiMahjongTile::PIN_4 )] = 0;
+			const UkeireResult starved = UkeireAgainst( hand, 0, remaining );
+
+			Assert::AreEqual( 2, static_cast<int>( starved.copies ) );
+			Assert::AreEqual( full.tiles, starved.tiles, L"shape is unchanged by what is left" );
+		}
+
+		TEST_METHOD( UnseenFromComplementsVisibleTo )
+		{
+			Engine engine( MahjongSoul4P(), 900 );
+			engine.StartHand( 0 );
+
+			const GameState &s = engine.State();
+
+			const Counts34 visible = s.VisibleTo( 0 );
+			const Counts34 unseen  = s.UnseenFrom( 0 );
+
+			for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+			{
+				Assert::AreEqual( static_cast<int>( s.rules.CopiesOf( t ) ),
+					static_cast<int>( visible[t] + unseen[t] ), L"seen plus unseen is every copy" );
+			}
+
+			// The dealer sees fourteen tiles of its own plus one indicator.
+			Assert::AreEqual( 15, TotalOf( visible ) );
+		}
+
+		TEST_METHOD( SanmaUnseenPoolExcludesTheMissingManzu )
+		{
+			Engine engine( MahjongSoul3P(), 901 );
+			engine.StartHand( 0 );
+
+			const Counts34 unseen = engine.State().UnseenFrom( 0 );
+
+			for ( TileId t = Id( RiichiMahjongTile::MAN_2 ); t <= Id( RiichiMahjongTile::MAN_8 ); ++t )
+			{
+				Assert::AreEqual( 0, static_cast<int>( unseen[t] ), L"those tiles do not exist" );
+			}
+		}
+	};
 }

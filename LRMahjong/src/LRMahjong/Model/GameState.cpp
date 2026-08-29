@@ -111,4 +111,19 @@ namespace LRMahjong::Model
 		return visible;
 	}
 
+	Counts34 GameState::UnseenFrom( const uint8_t viewer ) const
+	{
+		const Counts34 visible = VisibleTo( viewer );
+
+		Counts34 unseen{};
+		for ( TileId t = 0; t < TILE_KIND_COUNT; ++t )
+		{
+			const uint8_t total = rules.CopiesOf( t );
+			unseen[t] = ( visible[t] >= total ) ? static_cast<uint8_t>( 0 )
+				: static_cast<uint8_t>( total - visible[t] );
+		}
+
+		return unseen;
+	}
+
 } // namespace LRMahjong::Model
